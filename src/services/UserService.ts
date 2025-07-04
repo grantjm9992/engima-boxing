@@ -13,6 +13,7 @@ class UserService {
 
     // Create test user if no users exist
     this.createTestUserIfNeeded();
+    this.createAdditionalTestUsers();
   }
 
   private createTestUserIfNeeded(): void {
@@ -49,7 +50,7 @@ class UserService {
         id: uuidv4(),
         email: 'trainer@enigmaboxing.com',
         role: 'trainer',
-        subscriptionPlan: 'pro',
+        subscriptionPlan: 'premium',
         tempPassword: 'trainer123',
         tempPasswordExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         isActive: true,
@@ -60,7 +61,7 @@ class UserService {
       {
         id: uuidv4(),
         email: 'member@enigmaboxing.com',
-        role: 'member',
+        role: 'student',
         subscriptionPlan: 'basic',
         tempPassword: 'member123',
         tempPasswordExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
