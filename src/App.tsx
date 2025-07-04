@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Menu, X, Home, Users, Calendar, Dumbbell, 
-  Settings, BarChart3, Target, BookOpen, 
-  Sun, Moon, Monitor, Palette, CheckSquare, Video,
-  Timer, UserPlus
+import { useState, useEffect } from 'react';
+import {
+  Menu, X, Home, Users, Calendar, Dumbbell, BarChart3, Target, BookOpen,
+  Sun, Moon, CheckSquare, Video,
+  Timer, UserPlus, User
 } from 'lucide-react';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -17,7 +16,7 @@ import WeeklyPlanner from './components/WeeklyPlanner';
 import AchievementsManager from './components/AchievementsManager';
 import { WorkTypeGoal } from './components/GoalsManager';
 import { Goal } from './components/GoalsManager';
-import { WeekPlan, DayPlan } from './components/WeeklyPlanner';
+import { WeekPlan } from './components/WeeklyPlanner';
 import { Achievement } from './components/AchievementsManager';
 import StudentManager from './components/StudentManager';
 import StudentTaskManager from './components/StudentTaskManager';
