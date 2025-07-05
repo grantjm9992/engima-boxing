@@ -161,16 +161,6 @@ const RoutineDetails: React.FC<RoutineDetailsProps> = ({
                   </div>
                 )}
 
-                {routine.categories.length > 0 && (
-                  <div>
-                    <h4 className="font-medium text-gray-700 mb-2">Categorías</h4>
-                    <CategoryDisplay 
-                      categories={availableCategories} 
-                      selectedCategoryIds={routine.categories} 
-                      size="md"
-                    />
-                  </div>
-                )}
               </div>
 
               {/* Exercises */}
@@ -294,15 +284,7 @@ const RoutineDetails: React.FC<RoutineDetailsProps> = ({
                       {routine.exercises.reduce((total, ex) => total + ex.rounds, 0)}
                     </span>
                   </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Tag className="w-4 h-4 text-indigo-600" />
-                      <span className="text-sm text-gray-600">Categorías</span>
-                    </div>
-                    <span className="font-medium text-gray-900">{routine.categories.length}</span>
-                  </div>
-                  
+
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2">
                       <Calendar className="w-4 h-4 text-orange-600" />

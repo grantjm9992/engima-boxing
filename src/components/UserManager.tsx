@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Users, Plus, Search, Filter, Edit3, Trash2, 
+import {
+  Users, Plus, Search, Filter, Edit3, Trash2,
   Mail, X, Save, Shield, Key, CheckCircle,
   AlertCircle, User, UserPlus, UserMinus, MoreHorizontal,
-  Eye, EyeOff, RefreshCw
+  Eye, EyeOff, RefreshCw, Info
 } from 'lucide-react';
 import { UserRegistrationData, UserRole, SubscriptionPlan } from '../types/UserTypes';
 import { userService } from '../services/UserService';
