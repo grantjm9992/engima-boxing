@@ -42,9 +42,18 @@ interface UseRoutinesReturn {
 const convertApiRoutine = (apiRoutine: RoutineResponse): Routine => {
     console.log('Converting API routine:', apiRoutine);
 
+    // Handle MongoDB _id or regular id
+    const routineId = apiRoutine.id || apiRoutine._id;
+
+    if (!routineId) {
+        console.error('Routine missing ID field:', apiRoutine);
+        throw new Error('Routine missing ID field');
+
+    }
+
     const converted: Routine = {
-        // Required fields
-        id: apiRoutine.id,
+        // Use _id or id, whichever is available
+        id: routineId,
         name: apiRoutine.name,
 
         // Fields with defaults
@@ -70,7 +79,7 @@ const convertApiRoutine = (apiRoutine: RoutineResponse): Routine => {
         updatedAt: apiRoutine.updatedAt ? new Date(apiRoutine.updatedAt) : new Date(),
     };
 
-    console.log('Converted routine:', converted);
+    console.log('Converted routine with ID:', converted.id, converted);
     return converted;
 };
 
