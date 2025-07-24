@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Menu, X, Home, Users, Calendar, Dumbbell, 
-  Settings, BarChart3, Target, BookOpen, 
-  Sun, Moon, Monitor, Palette, CheckSquare, Video,
-  Timer, UserPlus
+import { useState, useEffect } from 'react';
+import {
+  Menu, X, Home, Users, Calendar, Dumbbell, BarChart3, Target, BookOpen,
+  Sun, Moon, CheckSquare, Video,
+  Timer, UserPlus, User
 } from 'lucide-react';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -17,7 +16,7 @@ import WeeklyPlanner from './components/WeeklyPlanner';
 import AchievementsManager from './components/AchievementsManager';
 import { WorkTypeGoal } from './components/GoalsManager';
 import { Goal } from './components/GoalsManager';
-import { WeekPlan, DayPlan } from './components/WeeklyPlanner';
+import { WeekPlan } from './components/WeeklyPlanner';
 import { Achievement } from './components/AchievementsManager';
 import StudentManager from './components/StudentManager';
 import StudentTaskManager from './components/StudentTaskManager';
@@ -29,6 +28,7 @@ import { PlannedClass } from './types/ClassTypes';
 import UserManager from './components/UserManager';
 import LoginForm from './components/LoginForm';
 import FirstLoginSetup from './components/FirstLoginSetup';
+import NotificationContainer from "./components/NotificationContainer.tsx";
 
 // Sample data
 const sampleCategories: Category[] = [
@@ -983,25 +983,6 @@ function AppContent() {
             </button>
 
             <button
-              onClick={() => setShowStudentManager(true)}
-              className="p-6 bg-white dark:bg-dark-surface rounded-xl shadow-sm border border-gray-200 dark:border-dark-border hover:shadow-md dark:hover:shadow-dark transition-all group"
-            >
-              <div className="flex items-center space-x-4">
-                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center group-hover:bg-blue-200 dark:group-hover:bg-blue-900/50 transition-colors">
-                  <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div className="text-left">
-                  <h3 className="font-semibold text-gray-900 dark:text-white">
-                    Estudiantes
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Gestionar estudiantes
-                  </p>
-                </div>
-              </div>
-            </button>
-
-            <button
               onClick={() => setShowGoalsManager(true)}
               className="p-6 bg-white dark:bg-dark-surface rounded-xl shadow-sm border border-gray-200 dark:border-dark-border hover:shadow-md dark:hover:shadow-dark transition-all group"
             >
@@ -1270,6 +1251,9 @@ function AppContent() {
         isOpen={showRoutineManager}
         onClose={() => setShowRoutineManager(false)}
       />
+
+      {/* Notification Container - Add this at the end */}
+      <NotificationContainer />
 
       {/* Class Planner */}
       <ClassPlanner

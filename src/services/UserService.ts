@@ -10,6 +10,79 @@ class UserService {
   constructor() {
     this.loadUsers();
     this.loadCurrentUser();
+
+    // Create test user if no users exist
+    this.createTestUserIfNeeded();
+    this.createAdditionalTestUsers();
+  }
+
+  private createTestUserIfNeeded(): void {
+    if (this.users.length === 0) {
+      const testUser: User = {
+        id: uuidv4(),
+        email: 'test@enigmaboxing.com',
+        role: 'admin',
+        subscriptionPlan: 'premium',
+        tempPassword: 'test123',
+        tempPasswordExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+        isActive: true,
+        isEmailVerified: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastLogin: undefined
+      };
+
+      this.users.push(testUser);
+      this.saveUsers();
+
+      console.log('🎯 Test user created!');
+      console.log('📧 Email: test@enigmaboxing.com');
+      console.log('🔑 Password: test123');
+      console.log('👤 Role: admin');
+      console.log('⭐ Plan: premium');
+    }
+  }
+
+  // Method to manually create additional test users
+  public createAdditionalTestUsers(): void {
+    const additionalTestUsers: User[] = [
+      {
+        id: uuidv4(),
+        email: 'trainer@enigmaboxing.com',
+        role: 'trainer',
+        subscriptionPlan: 'premium',
+        tempPassword: 'trainer123',
+        tempPasswordExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        isActive: true,
+        isEmailVerified: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: uuidv4(),
+        email: 'member@enigmaboxing.com',
+        role: 'student',
+        subscriptionPlan: 'basic',
+        tempPassword: 'member123',
+        tempPasswordExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        isActive: true,
+        isEmailVerified: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ];
+
+    // Check if these users already exist before adding
+    additionalTestUsers.forEach(testUser => {
+      if (!this.users.some(user => user.email === testUser.email)) {
+        this.users.push(testUser);
+      }
+    });
+
+    this.saveUsers();
+    console.log('Additional test users created:');
+    console.log('👨‍💼 Trainer: trainer@enigmaboxing.com / trainer123');
+    console.log('👤 Member: member@enigmaboxing.com / member123');
   }
 
   private loadUsers(): void {
@@ -167,7 +240,7 @@ class UserService {
   // Actualizar perfil de usuario
   public updateUserProfile(userId: string, profileData: UserProfileUpdateData): User {
     const userIndex = this.users.findIndex(u => u.id === userId);
-    
+
     if (userIndex === -1) {
       throw new Error('Usuario no encontrado');
     }
@@ -192,7 +265,7 @@ class UserService {
   // Cambiar contraseña (primera vez o cambio regular)
   public changePassword(userId: string, passwordData: PasswordChangeData): User {
     const userIndex = this.users.findIndex(u => u.id === userId);
-    
+
     if (userIndex === -1) {
       throw new Error('Usuario no encontrado');
     }
@@ -237,7 +310,7 @@ class UserService {
   // Restablecer contraseña
   public resetPassword(email: string): { user: User; tempPassword: string } {
     const userIndex = this.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-    
+
     if (userIndex === -1) {
       throw new Error('Usuario no encontrado');
     }
@@ -267,7 +340,7 @@ class UserService {
   // Activar/desactivar usuario
   public toggleUserActive(userId: string, isActive: boolean): User {
     const userIndex = this.users.findIndex(u => u.id === userId);
-    
+
     if (userIndex === -1) {
       throw new Error('Usuario no encontrado');
     }
@@ -293,6 +366,14 @@ class UserService {
       this.currentUser = null;
       this.saveCurrentUser();
     }
+  }
+
+  public clearAllData(): void {
+    this.users = [];
+    this.currentUser = null;
+    localStorage.removeItem(this.storageKey);
+    localStorage.removeItem(this.currentUserKey);
+    console.log('All user data cleared!');
   }
 
   // Enviar correo de bienvenida con credenciales temporales
@@ -322,7 +403,7 @@ class UserService {
       Saludos,
       Equipo de Enigma Boxing Club
     `);
-    
+
     return true;
   }
 }
