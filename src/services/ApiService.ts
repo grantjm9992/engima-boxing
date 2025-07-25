@@ -1,15 +1,11 @@
-// src/services/ApiService.ts
-import { User, LoginCredentials, UserRegistrationData, UserProfileUpdateData, PasswordChangeData } from '../types/UserTypes';
+// src/services/apiService.ts
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:80/api';
 
-export interface ApiResponse<T = any> {
-    message?: string;
+export interface ApiResponse<T> {
     data?: T;
+    message?: string;
     errors?: Record<string, string[]>;
-}
-
-export interface PaginatedResponse<T = any> {
-    data: T[];
-    pagination: {
+    pagination?: {
         current_page: number;
         last_page: number;
         per_page: number;
@@ -18,387 +14,419 @@ export interface PaginatedResponse<T = any> {
 }
 
 class ApiService {
-    public baseURL: string;
-    private token: string | null = null;
+    private async request<T>(
+        endpoint: string,
+        options: RequestInit = {}
+    ): Promise<T> {
+        const token = localStorage.getItem('auth-token');
 
-    constructor() {
-        this.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:80/api';
-        this.token = localStorage.getItem('auth_token');
-    }
-
-    public getHeaders(): HeadersInit {
-        const headers: HeadersInit = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-        };
-
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
-        }
-
-        return headers;
-    }
-
-    public async handleResponse<T = any>(response: Response): Promise<T> {
-        const data = await response.json();
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token && { Authorization: `Bearer ${token}` }),
+                ...options.headers,
+            },
+            ...options,
+        });
 
         if (!response.ok) {
-            if (response.status === 401) {
-                this.clearToken();
-                window.location.href = '/login';
-            }
-            throw new Error(data.message || 'An error occurred');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
 
-        return data;
+        return response.json();
     }
 
-    private setToken(token: string): void {
-        this.token = token;
-        localStorage.setItem('auth_token', token);
-    }
-
-    private clearToken(): void {
-        this.token = null;
-        localStorage.removeItem('auth_token');
-    }
-
-    // Generic HTTP methods
-    public async get<T = any>(endpoint: string, params?: Record<string, any>): Promise<T> {
-        const url = new URL(`${this.baseURL}${endpoint}`);
-        if (params) {
-            Object.entries(params).forEach(([key, value]) => {
-                if (value !== undefined && value !== null) {
-                    url.searchParams.append(key, value.toString());
-                }
-            });
-        }
-
-        const response = await fetch(url.toString(), {
-            headers: this.getHeaders(),
-        });
-
-        return this.handleResponse<T>(response);
-    }
-
-    public async post<T = any>(endpoint: string, data?: any): Promise<T> {
-        const response = await fetch(`${this.baseURL}${endpoint}`, {
+    // Direct auth methods (backward compatibility)
+    async login(credentials: { email: string; password: string }) {
+        return this.request<{ user: any; token: string }>('/auth/login', {
             method: 'POST',
-            headers: this.getHeaders(),
-            body: data ? JSON.stringify(data) : undefined,
-        });
-
-        return this.handleResponse<T>(response);
-    }
-
-    public async put<T = any>(endpoint: string, data?: any): Promise<T> {
-        const response = await fetch(`${this.baseURL}${endpoint}`, {
-            method: 'PUT',
-            headers: this.getHeaders(),
-            body: data ? JSON.stringify(data) : undefined,
-        });
-
-        return this.handleResponse<T>(response);
-    }
-
-    public async delete<T = any>(endpoint: string): Promise<T> {
-        const response = await fetch(`${this.baseURL}${endpoint}`, {
-            method: 'DELETE',
-            headers: this.getHeaders(),
-        });
-
-        return this.handleResponse<T>(response);
-    }
-
-    // Auth endpoints
-    async login(credentials: LoginCredentials): Promise<{ user: User; token: string; is_first_login: boolean }> {
-        const response = await fetch(`${this.baseURL}/auth/login`, {
-            method: 'POST',
-            headers: this.getHeaders(),
             body: JSON.stringify(credentials),
         });
-
-        const data = await this.handleResponse<{ user: User; token: string; is_first_login: boolean }>(response);
-        this.setToken(data.token);
-        return data;
     }
 
-    async register(userData: UserRegistrationData): Promise<{ user: User; temp_password: string }> {
-        const response = await fetch(`${this.baseURL}/auth/register`, {
+    async logout() {
+        return this.request<void>('/auth/logout', {
             method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify(userData),
         });
-
-        return this.handleResponse(response);
     }
 
-    async getCurrentUser(): Promise<{ user: User; is_first_login: boolean }> {
-        const response = await fetch(`${this.baseURL}/auth/me`, {
-            headers: this.getHeaders(),
-        });
-
-        return this.handleResponse(response);
+    async me() {
+        return this.request<{ user: any; is_first_login?: boolean }>('/auth/me');
     }
 
-    async updateProfile(data: UserProfileUpdateData): Promise<{ user: User }> {
-        const response = await fetch(`${this.baseURL}/auth/profile`, {
+    async updateProfile(data: any) {
+        return this.request<{ user: any }>('/auth/profile', {
             method: 'PUT',
-            headers: this.getHeaders(),
             body: JSON.stringify(data),
         });
-
-        return this.handleResponse(response);
     }
 
-    async changePassword(data: PasswordChangeData): Promise<{ user: User }> {
-        const response = await fetch(`${this.baseURL}/auth/change-password`, {
+    async changePassword(data: { old_password: string; new_password: string; new_password_confirmation: string }) {
+        return this.request<{ user: any }>('/auth/change-password', {
             method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify({
-                old_password: data.oldPassword,
-                new_password: data.newPassword,
-                new_password_confirmation: data.newPassword,
+            body: JSON.stringify(data),
+        });
+    }
+
+    // Auth API (namespaced version)
+    auth = {
+        login: (credentials: { email: string; password: string }) => this.login(credentials),
+        logout: () => this.logout(),
+        me: () => this.me(),
+        updateProfile: (data: any) => this.updateProfile(data),
+        changePassword: (data: { current_password: string; new_password: string }) =>
+            this.changePassword({
+                old_password: data.current_password,
+                new_password: data.new_password,
+                new_password_confirmation: data.new_password
             }),
-        });
+    };
 
-        return this.handleResponse(response);
-    }
+    // Categories API
+    categories = {
+        getAll: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ categories: any[]; total: number }>(`/categories?${searchParams}`);
+        },
 
-    async resetPassword(email: string): Promise<{ temp_password: string }> {
-        const response = await fetch(`${this.baseURL}/auth/reset-password`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify({ email }),
-        });
+        getById: (id: string) =>
+            this.request<{ category: any }>(`/categories/${id}`),
 
-        return this.handleResponse(response);
-    }
-
-    async logout(): Promise<void> {
-        try {
-            await fetch(`${this.baseURL}/auth/logout`, {
+        create: (data: any) =>
+            this.request<{ category: any; message: string }>('/categories', {
                 method: 'POST',
-                headers: this.getHeaders(),
-            });
-        } finally {
-            this.clearToken();
-        }
-    }
+                body: JSON.stringify(data),
+            }),
 
-    // User management endpoints
-    async getUsers(params?: {
-        role?: string;
-        active?: boolean;
-        search?: string;
-        sort_by?: string;
-        sort_direction?: string;
-        per_page?: number;
-        page?: number;
-    }): Promise<PaginatedResponse<User>> {
-        const searchParams = new URLSearchParams();
+        update: (id: string, data: any) =>
+            this.request<{ category: any; message: string }>(`/categories/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            }),
 
-        if (params) {
-            Object.entries(params).forEach(([key, value]) => {
-                if (value !== undefined && value !== null) {
-                    searchParams.append(key, value.toString());
-                }
-            });
-        }
+        delete: (id: string) =>
+            this.request<{ message: string }>(`/categories/${id}`, {
+                method: 'DELETE',
+            }),
 
-        const response = await fetch(`${this.baseURL}/users?${searchParams}`, {
-            headers: this.getHeaders(),
-        });
+        updateSortOrder: (categoryIds: string[]) =>
+            this.request<{ message: string }>('/categories/sort-order', {
+                method: 'POST',
+                body: JSON.stringify({ category_ids: categoryIds }),
+            }),
 
-        const data = await this.handleResponse<{ users: User[]; pagination: any }>(response);
-        return {
-            data: data.users,
-            pagination: data.pagination,
-        };
-    }
+        getUsageStatistics: () =>
+            this.request<any>('/categories/statistics/usage'),
+    };
 
-    async getUser(id: string): Promise<{ user: User }> {
-        const response = await fetch(`${this.baseURL}/users/${id}`, {
-            headers: this.getHeaders(),
-        });
+    // Tags API
+    tags = {
+        getAll: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ tags: any[]; total: number }>(`/tags?${searchParams}`);
+        },
 
-        return this.handleResponse(response);
-    }
+        getById: (id: string) =>
+            this.request<{ tag: any }>(`/tags/${id}`),
 
-    async createUser(userData: UserRegistrationData): Promise<{ user: User; temp_password: string }> {
-        const response = await fetch(`${this.baseURL}/users`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify(userData),
-        });
+        create: (data: { name: string; color: string; description?: string }) =>
+            this.request<{ tag: any; message: string }>('/tags', {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
 
-        return this.handleResponse(response);
-    }
+        update: (id: string, data: any) =>
+            this.request<{ tag: any; message: string }>(`/tags/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            }),
 
-    async updateUser(id: string, userData: Partial<User>): Promise<{ user: User }> {
-        const response = await fetch(`${this.baseURL}/users/${id}`, {
-            method: 'PUT',
-            headers: this.getHeaders(),
-            body: JSON.stringify(userData),
-        });
+        delete: (id: string) =>
+            this.request<{ message: string }>(`/tags/${id}`, {
+                method: 'DELETE',
+            }),
 
-        return this.handleResponse(response);
-    }
+        getUsageStatistics: () =>
+            this.request<any>('/tags/statistics/usage'),
+    };
 
-    async deleteUser(id: string): Promise<void> {
-        const response = await fetch(`${this.baseURL}/users/${id}`, {
-            method: 'DELETE',
-            headers: this.getHeaders(),
-        });
+    // Exercises API
+    exercises = {
+        getAll: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ exercises: any[]; pagination: any }>(`/exercises?${searchParams}`);
+        },
 
-        await this.handleResponse(response);
-    }
+        getById: (id: string) =>
+            this.request<{ exercise: any }>(`/exercises/${id}`),
 
-    async resetUserPassword(id: string): Promise<{ temp_password: string }> {
-        const response = await fetch(`${this.baseURL}/users/${id}/reset-password`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-        });
+        create: (data: any) =>
+            this.request<{ exercise: any; message: string }>('/exercises', {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
 
-        return this.handleResponse(response);
-    }
+        update: (id: string, data: any) =>
+            this.request<{ exercise: any; message: string }>(`/exercises/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            }),
 
-    async toggleUserActive(id: string): Promise<{ user: User }> {
-        const response = await fetch(`${this.baseURL}/users/${id}/toggle-active`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-        });
+        delete: (id: string) =>
+            this.request<{ message: string }>(`/exercises/${id}`, {
+                method: 'DELETE',
+            }),
 
-        return this.handleResponse(response);
-    }
+        clone: (id: string, data?: any) =>
+            this.request<{ exercise: any; message: string }>(`/exercises/${id}/clone`, {
+                method: 'POST',
+                body: JSON.stringify(data || {}),
+            }),
 
-    async getUserStatistics(): Promise<{
-        total_users: number;
-        active_users: number;
-        by_role: Record<string, number>;
-        by_subscription: Record<string, number>;
-        recent_logins: number;
-        pending_email_verification: number;
-    }> {
-        const response = await fetch(`${this.baseURL}/users/statistics`, {
-            headers: this.getHeaders(),
-        });
+        toggleFavorite: (id: string) =>
+            this.request<{ exercise: any; message: string }>(`/exercises/${id}/toggle-favorite`, {
+                method: 'POST',
+            }),
 
-        return this.handleResponse(response);
-    }
+        getUsageStatistics: () =>
+            this.request<any>('/exercises/statistics/usage'),
+    };
 
-    // Student endpoints
-    async getStudents(params?: {
-        level?: string;
-        min_age?: number;
-        max_age?: number;
-        search?: string;
-        sort_by?: string;
-        sort_direction?: string;
-        per_page?: number;
-        page?: number;
-    }): Promise<PaginatedResponse<any>> {
-        const searchParams = new URLSearchParams();
+    // Routines API
+    routines = {
+        getAll: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ routines: any[]; pagination: any }>(`/routines?${searchParams}`);
+        },
 
-        if (params) {
-            Object.entries(params).forEach(([key, value]) => {
-                if (value !== undefined && value !== null) {
-                    searchParams.append(key, value.toString());
-                }
-            });
-        }
+        getById: (id: string) =>
+            this.request<{ routine: any }>(`/routines/${id}`),
 
-        const response = await fetch(`${this.baseURL}/students?${searchParams}`, {
-            headers: this.getHeaders(),
-        });
+        create: (data: any) =>
+            this.request<{ routine: any; message: string }>('/routines', {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
 
-        const data = await this.handleResponse<{ students: any[]; pagination: any }>(response);
-        return {
-            data: data.students,
-            pagination: data.pagination,
-        };
-    }
+        update: (id: string, data: any) =>
+            this.request<{ routine: any; message: string }>(`/routines/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            }),
 
-    async getStudent(id: string): Promise<{ student: any }> {
-        const response = await fetch(`${this.baseURL}/students/${id}`, {
-            headers: this.getHeaders(),
-        });
+        delete: (id: string) =>
+            this.request<{ message: string }>(`/routines/${id}`, {
+                method: 'DELETE',
+            }),
 
-        return this.handleResponse(response);
-    }
+        clone: (id: string, data?: any) =>
+            this.request<{ routine: any; message: string }>(`/routines/${id}/clone`, {
+                method: 'POST',
+                body: JSON.stringify(data || {}),
+            }),
 
-    async updateStudentProfile(id: string, profileData: {
-        age?: number;
-        height?: number;
-        weight?: number;
-        level?: string;
-        strengths?: string[];
-        weaknesses?: string[];
-        notes?: string;
-    }): Promise<{ student: any }> {
-        const response = await fetch(`${this.baseURL}/students/${id}/profile`, {
-            method: 'PUT',
-            headers: this.getHeaders(),
-            body: JSON.stringify(profileData),
-        });
+        toggleFavorite: (id: string) =>
+            this.request<{ routine: any; message: string }>(`/routines/${id}/toggle-favorite`, {
+                method: 'POST',
+            }),
 
-        return this.handleResponse(response);
-    }
+        toggleActive: (id: string) =>
+            this.request<{ routine: any; message: string }>(`/routines/${id}/toggle-active`, {
+                method: 'POST',
+            }),
 
-    async updateStudentWeight(id: string, weight: number): Promise<{ student: any }> {
-        const response = await fetch(`${this.baseURL}/students/${id}/weight`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify({ weight }),
-        });
+        getUsageStatistics: () =>
+            this.request<any>('/routines/statistics/usage'),
+    };
 
-        return this.handleResponse(response);
-    }
+    // Planned Classes API
+    plannedClasses = {
+        getAll: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ classes: any[]; pagination: any }>(`/planned-classes?${searchParams}`);
+        },
 
-    async updateStudentTacticalNotes(id: string, tacticalNotes: string): Promise<{ student: any }> {
-        const response = await fetch(`${this.baseURL}/students/${id}/tactical-notes`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify({ tactical_notes: tacticalNotes }),
-        });
+        getById: (id: string) =>
+            this.request<{ class: any; target_students: any[] }>(`/planned-classes/${id}`),
 
-        return this.handleResponse(response);
-    }
+        create: (data: any) =>
+            this.request<{ class: any; message: string }>('/planned-classes', {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
 
-    async addStudentPendingNote(id: string, note: string): Promise<{ student: any }> {
-        const response = await fetch(`${this.baseURL}/students/${id}/pending-notes`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify({ note }),
-        });
+        update: (id: string, data: any) =>
+            this.request<{ class: any; message: string }>(`/planned-classes/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            }),
 
-        return this.handleResponse(response);
-    }
+        delete: (id: string) =>
+            this.request<{ message: string }>(`/planned-classes/${id}`, {
+                method: 'DELETE',
+            }),
 
-    async removeStudentPendingNote(id: string, noteIndex: number): Promise<{ student: any }> {
-        const response = await fetch(`${this.baseURL}/students/${id}/pending-notes/${noteIndex}`, {
-            method: 'DELETE',
-            headers: this.getHeaders(),
-        });
+        duplicate: (id: string, data?: any) =>
+            this.request<{ class: any; message: string }>(`/planned-classes/${id}/duplicate`, {
+                method: 'POST',
+                body: JSON.stringify(data || {}),
+            }),
 
-        return this.handleResponse(response);
-    }
+        markComplete: (id: string, data: any) =>
+            this.request<{ class: any; message: string }>(`/planned-classes/${id}/complete`, {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
 
-    async getStudentStatistics(): Promise<{
-        total_students: number;
-        active_students: number;
-        by_level: Record<string, number>;
-        by_age_group: Record<string, number>;
-        average_age: number;
-        with_profiles: number;
-        pending_notes_count: number;
-    }> {
-        const response = await fetch(`${this.baseURL}/students/statistics`, {
-            headers: this.getHeaders(),
-        });
+        getCalendarView: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ classes: any[] }>(`/planned-classes/calendar/view?${searchParams}`);
+        },
 
-        return this.handleResponse(response);
-    }
+        getUpcoming: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ classes: any[]; count: number }>(`/planned-classes/upcoming/list?${searchParams}`);
+        },
+
+        getStatistics: () =>
+            this.request<any>('/planned-classes/statistics'),
+    };
+
+    // Routine Completions API
+    routineCompletions = {
+        getAll: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ completions: any[]; pagination: any }>(`/routine-completions?${searchParams}`);
+        },
+
+        getById: (id: string) =>
+            this.request<{ completion: any }>(`/routine-completions/${id}`),
+
+        create: (data: any) =>
+            this.request<{ completion: any; message: string }>('/routine-completions', {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
+
+        update: (id: string, data: any) =>
+            this.request<{ completion: any; message: string }>(`/routine-completions/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            }),
+
+        delete: (id: string) =>
+            this.request<{ message: string }>(`/routine-completions/${id}`, {
+                method: 'DELETE',
+            }),
+
+        getDailyStats: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<any>(`/routine-completions/statistics/daily?${searchParams}`);
+        },
+
+        getStudentStats: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<any>(`/routine-completions/statistics/student?${searchParams}`);
+        },
+
+        getCategoryStats: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<any>(`/routine-completions/statistics/category?${searchParams}`);
+        },
+
+        exportData: (params?: Record<string, any>) =>
+            this.request<{ download_url: string }>('/routine-completions/export', {
+                method: 'POST',
+                body: JSON.stringify(params || {}),
+            }),
+    };
+
+    // Students API
+    students = {
+        getAll: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ users: any[]; pagination: any }>(`/students?${searchParams}`);
+        },
+
+        getById: (id: string) =>
+            this.request<{ user: any }>(`/students/${id}`),
+
+        updateProfile: (id: string, data: any) =>
+            this.request<{ user: any; message: string }>(`/students/${id}/profile`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            }),
+
+        updateWeight: (id: string, data: { weight: number; date?: string }) =>
+            this.request<{ user: any; message: string }>(`/students/${id}/weight`, {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
+
+        addPendingNote: (id: string, data: { note: string }) =>
+            this.request<{ user: any; message: string }>(`/students/${id}/pending-notes`, {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
+
+        removePendingNote: (id: string, noteIndex: number) =>
+            this.request<{ user: any; message: string }>(`/students/${id}/pending-notes/${noteIndex}`, {
+                method: 'DELETE',
+            }),
+
+        updateTacticalNotes: (id: string, data: { notes: string }) =>
+            this.request<{ user: any; message: string }>(`/students/${id}/tactical-notes`, {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
+
+        getStatistics: () =>
+            this.request<any>('/students/statistics'),
+    };
+
+    // Users API (admin/trainer only)
+    users = {
+        getAll: (params?: Record<string, any>) => {
+            const searchParams = new URLSearchParams(params);
+            return this.request<{ users: any[]; pagination: any }>(`/users?${searchParams}`);
+        },
+
+        getById: (id: string) =>
+            this.request<{ user: any }>(`/users/${id}`),
+
+        create: (data: any) =>
+            this.request<{ user: any; message: string }>('/users', {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
+
+        update: (id: string, data: any) =>
+            this.request<{ user: any; message: string }>(`/users/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            }),
+
+        delete: (id: string) =>
+            this.request<{ message: string }>(`/users/${id}`, {
+                method: 'DELETE',
+            }),
+
+        resetPassword: (id: string, data: { password: string }) =>
+            this.request<{ message: string }>(`/users/${id}/reset-password`, {
+                method: 'POST',
+                body: JSON.stringify(data),
+            }),
+
+        toggleActive: (id: string) =>
+            this.request<{ user: any; message: string }>(`/users/${id}/toggle-active`, {
+                method: 'POST',
+            }),
+
+        getStatistics: () =>
+            this.request<any>('/users/statistics'),
+    };
 }
 
 export const apiService = new ApiService();
+export default apiService;

@@ -1,220 +1,562 @@
 // src/hooks/useRoutines.ts
-import { useState, useEffect, useCallback } from 'react';
-import { routineApi, RoutineResponse, CreateRoutineRequest, UpdateRoutineRequest } from '../services/routineApi';
+import { useState, useCallback } from 'react';
+import { apiService } from '../services/apiService';
+
+export interface Exercise {
+    id: string;
+    name: string;
+    description?: string;
+    duration: number;
+    intensity: 'low' | 'medium' | 'high';
+    workType: 'strength' | 'coordination' | 'reaction' | 'technique' | 'cardio' | 'flexibility' | 'sparring' | 'conditioning';
+    difficulty: 'beginner' | 'intermediate' | 'advanced';
+    tags: string[];
+    materials: string[];
+    protection: string[];
+    instructions: string[];
+    videoUrl?: string;
+    imageUrl?: string;
+    isMultiTimer: boolean;
+    timers?: Array<{
+        name: string;
+        duration: number;
+        repetitions: number;
+        restBetween?: number;
+    }>;
+    isTemplate: boolean;
+    visibility: 'private' | 'shared' | 'public';
+    isFavorite?: boolean;
+    isActive: boolean;
+    categoryIds: string[];
+    createdBy: string;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface RoutineBlock {
+    id: string;
+    name: string;
+    exercises: Exercise[];
+    duration: number;
+    restBetween?: number;
+}
 
 export interface Routine {
     id: string;
     name: string;
-    description: string;
-    objective: string;
-    exercises: any[];
-    materials: any[];
+    description?: string;
+    objective?: string;
+    difficulty: 'beginner' | 'intermediate' | 'advanced';
+    level: 'principiante' | 'intermedio' | 'avanzado';
+    tags: string[];
+    materials: string[];
     protection: string[];
     totalDuration: number;
-    difficulty: 'beginner' | 'intermediate' | 'advanced';
-    visibility: 'private' | 'shared';
+    blocks: RoutineBlock[];
     isTemplate: boolean;
     templateCategory?: 'technique' | 'physical' | 'shadow' | 'sparring' | 'conditioning';
     isFavorite: boolean;
-    trainerNotes: string;
+    visibility: 'private' | 'shared' | 'public';
+    isActive: boolean;
+    trainerNotes?: string;
+    repeatInDays?: number;
+    scheduledDays?: string[];
+    categoryIds: string[];
+    createdBy: string;
     createdAt: Date;
     updatedAt: Date;
-    blockStructure?: any;
-    tags: string[];
-    repeatInDays: number;
-    level?: 'principiante' | 'intermedio' | 'avanzado' | 'competidor' | 'elite';
 }
 
-interface UseRoutinesReturn {
+interface RoutinesState {
     routines: Routine[];
-    loading: boolean;
+    exercises: Exercise[];
+    isLoading: boolean;
     error: string | null;
-    createRoutine: (routine: CreateRoutineRequest) => Promise<Routine>;
-    updateRoutine: (id: string, updates: UpdateRoutineRequest) => Promise<Routine>;
-    deleteRoutine: (id: string) => Promise<void>;
-    duplicateRoutine: (routine: Routine) => Promise<Routine>;
-    toggleFavorite: (routine: Routine) => Promise<Routine>;
-    refreshRoutines: () => Promise<void>;
-    getRoutineById: (id: string) => Routine | undefined;
 }
 
-// Helper function to convert API response to local format
-const convertApiRoutine = (apiRoutine: RoutineResponse): Routine => {
-    console.log('Converting API routine:', apiRoutine);
+export const useRoutines = () => {
+    const [state, setState] = useState<RoutinesState>({
+        routines: [],
+        exercises: [],
+        isLoading: false,
+        error: null,
+    });
 
-    // Handle MongoDB _id or regular id
-    const routineId = apiRoutine.id || apiRoutine._id;
-
-    if (!routineId) {
-        console.error('Routine missing ID field:', apiRoutine);
-        throw new Error('Routine missing ID field');
-
-    }
-
-    const converted: Routine = {
-        // Use _id or id, whichever is available
-        id: routineId,
-        name: apiRoutine.name,
-
-        // Fields with defaults
-        description: apiRoutine.description || '',
-        objective: apiRoutine.objective || '',
-        exercises: apiRoutine.exercises || [],
-        materials: apiRoutine.materials || [],
-        protection: apiRoutine.protection || [],
-        tags: apiRoutine.tags || [],
-        trainerNotes: apiRoutine.trainerNotes || '',
-        totalDuration: apiRoutine.totalDuration || 0,
-        repeatInDays: apiRoutine.repeatInDays || 0,
-        difficulty: apiRoutine.difficulty || 'intermediate',
-        visibility: apiRoutine.visibility || 'private',
-        isTemplate: apiRoutine.isTemplate || false,
-        isFavorite: apiRoutine.isFavorite || false,
-        level: apiRoutine.level,
-        templateCategory: apiRoutine.templateCategory,
-        blockStructure: apiRoutine.blockStructure,
-
-        // Convert date strings to Date objects safely
-        createdAt: apiRoutine.createdAt ? new Date(apiRoutine.createdAt) : new Date(),
-        updatedAt: apiRoutine.updatedAt ? new Date(apiRoutine.updatedAt) : new Date(),
+    // Loading and error handling
+    const setLoading = (loading: boolean) => {
+        setState(prev => ({ ...prev, isLoading: loading }));
     };
 
-    console.log('Converted routine with ID:', converted.id, converted);
-    return converted;
-};
+    const setError = (error: string | null) => {
+        setState(prev => ({ ...prev, error }));
+    };
 
-export const useRoutines = (): UseRoutinesReturn => {
-    const [routines, setRoutines] = useState<Routine[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    // Load routines
+    const loadRoutines = useCallback(async (params?: any) => {
+        setLoading(true);
+        setError(null);
 
-    // Load routines from API
-    const loadRoutines = useCallback(async () => {
         try {
-            setLoading(true);
-            setError(null);
-            const apiRoutines = await routineApi.getRoutines();
-            const convertedRoutines = apiRoutines.map(convertApiRoutine);
-            setRoutines(convertedRoutines);
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Error loading routines';
-            setError(errorMessage);
-            console.error('Error loading routines:', err);
+            const response = await apiService.routines.getAll(params);
+            const routines = response.routines.map(routine => ({
+                ...routine,
+                createdAt: new Date(routine.created_at),
+                updatedAt: new Date(routine.updated_at),
+            }));
+
+            setState(prev => ({ ...prev, routines }));
+            return { routines, pagination: response.pagination };
+        } catch (error) {
+            console.error('Error loading routines:', error);
+            setError(error instanceof Error ? error.message : 'Error loading routines');
+            return { routines: [], pagination: null };
         } finally {
             setLoading(false);
         }
     }, []);
 
-    // Create a new routine
-    const createRoutine = useCallback(async (routineData: CreateRoutineRequest): Promise<Routine> => {
-        try {
-            setError(null);
-            const apiRoutine = await routineApi.createRoutine(routineData);
-            const newRoutine = convertApiRoutine(apiRoutine);
+    // Load exercises
+    const loadExercises = useCallback(async (params?: any) => {
+        setLoading(true);
+        setError(null);
 
-            setRoutines(prev => [...prev, newRoutine]);
+        try {
+            const response = await apiService.exercises.getAll(params);
+            const exercises = response.exercises.map(exercise => ({
+                ...exercise,
+                createdAt: new Date(exercise.created_at),
+                updatedAt: new Date(exercise.updated_at),
+            }));
+
+            setState(prev => ({ ...prev, exercises }));
+            return { exercises, pagination: response.pagination };
+        } catch (error) {
+            console.error('Error loading exercises:', error);
+            setError(error instanceof Error ? error.message : 'Error loading exercises');
+            return { exercises: [], pagination: null };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    // Get single routine
+    const getRoutine = async (id: string): Promise<Routine | null> => {
+        try {
+            setLoading(true);
+            const response = await apiService.routines.getById(id);
+            return {
+                ...response.routine,
+                createdAt: new Date(response.routine.created_at),
+                updatedAt: new Date(response.routine.updated_at),
+            };
+        } catch (error) {
+            console.error('Error getting routine:', error);
+            setError(error instanceof Error ? error.message : 'Error loading routine');
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Get single exercise
+    const getExercise = async (id: string): Promise<Exercise | null> => {
+        try {
+            setLoading(true);
+            const response = await apiService.exercises.getById(id);
+            return {
+                ...response.exercise,
+                createdAt: new Date(response.exercise.created_at),
+                updatedAt: new Date(response.exercise.updated_at),
+            };
+        } catch (error) {
+            console.error('Error getting exercise:', error);
+            setError(error instanceof Error ? error.message : 'Error loading exercise');
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Create routine
+    const createRoutine = async (routineData: Omit<Routine, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>): Promise<Routine | null> => {
+        try {
+            setLoading(true);
+            const response = await apiService.routines.create({
+                name: routineData.name,
+                description: routineData.description,
+                objective: routineData.objective,
+                difficulty: routineData.difficulty,
+                level: routineData.level,
+                tags: routineData.tags,
+                materials: routineData.materials,
+                protection: routineData.protection,
+                total_duration: routineData.totalDuration,
+                blocks: routineData.blocks,
+                is_template: routineData.isTemplate,
+                template_category: routineData.templateCategory,
+                is_favorite: routineData.isFavorite,
+                visibility: routineData.visibility,
+                is_active: routineData.isActive,
+                trainer_notes: routineData.trainerNotes,
+                repeat_in_days: routineData.repeatInDays,
+                scheduled_days: routineData.scheduledDays,
+                category_ids: routineData.categoryIds,
+            });
+
+            const newRoutine: Routine = {
+                ...response.routine,
+                createdAt: new Date(response.routine.created_at),
+                updatedAt: new Date(response.routine.updated_at),
+            };
+
+            setState(prev => ({
+                ...prev,
+                routines: [...prev.routines, newRoutine],
+            }));
+
             return newRoutine;
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Error creating routine';
-            setError(errorMessage);
-            throw new Error(errorMessage);
+        } catch (error) {
+            console.error('Error creating routine:', error);
+            setError(error instanceof Error ? error.message : 'Error creating routine');
+            return null;
+        } finally {
+            setLoading(false);
         }
-    }, []);
+    };
 
-    // Update an existing routine
-    const updateRoutine = useCallback(async (id: string, updates: UpdateRoutineRequest): Promise<Routine> => {
+    // Create exercise
+    const createExercise = async (exerciseData: Omit<Exercise, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>): Promise<Exercise | null> => {
         try {
-            setError(null);
-            const apiRoutine = await routineApi.updateRoutine(id, updates);
-            const updatedRoutine = convertApiRoutine(apiRoutine);
+            setLoading(true);
+            const response = await apiService.exercises.create({
+                name: exerciseData.name,
+                description: exerciseData.description,
+                duration: exerciseData.duration,
+                intensity: exerciseData.intensity,
+                work_type: exerciseData.workType,
+                difficulty: exerciseData.difficulty,
+                tags: exerciseData.tags,
+                materials: exerciseData.materials,
+                protection: exerciseData.protection,
+                instructions: exerciseData.instructions,
+                video_url: exerciseData.videoUrl,
+                image_url: exerciseData.imageUrl,
+                is_multi_timer: exerciseData.isMultiTimer,
+                timers: exerciseData.timers,
+                is_template: exerciseData.isTemplate,
+                visibility: exerciseData.visibility,
+                is_active: exerciseData.isActive,
+                category_ids: exerciseData.categoryIds,
+            });
 
-            setRoutines(prev =>
-                prev.map(routine =>
+            const newExercise: Exercise = {
+                ...response.exercise,
+                createdAt: new Date(response.exercise.created_at),
+                updatedAt: new Date(response.exercise.updated_at),
+            };
+
+            setState(prev => ({
+                ...prev,
+                exercises: [...prev.exercises, newExercise],
+            }));
+
+            return newExercise;
+        } catch (error) {
+            console.error('Error creating exercise:', error);
+            setError(error instanceof Error ? error.message : 'Error creating exercise');
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Update routine
+    const updateRoutine = async (id: string, updates: Partial<Routine>): Promise<Routine | null> => {
+        try {
+            setLoading(true);
+            const response = await apiService.routines.update(id, {
+                name: updates.name,
+                description: updates.description,
+                objective: updates.objective,
+                difficulty: updates.difficulty,
+                level: updates.level,
+                tags: updates.tags,
+                materials: updates.materials,
+                protection: updates.protection,
+                total_duration: updates.totalDuration,
+                blocks: updates.blocks,
+                is_template: updates.isTemplate,
+                template_category: updates.templateCategory,
+                is_favorite: updates.isFavorite,
+                visibility: updates.visibility,
+                is_active: updates.isActive,
+                trainer_notes: updates.trainerNotes,
+                repeat_in_days: updates.repeatInDays,
+                scheduled_days: updates.scheduledDays,
+                category_ids: updates.categoryIds,
+            });
+
+            const updatedRoutine: Routine = {
+                ...response.routine,
+                createdAt: new Date(response.routine.created_at),
+                updatedAt: new Date(response.routine.updated_at),
+            };
+
+            setState(prev => ({
+                ...prev,
+                routines: prev.routines.map(routine =>
                     routine.id === id ? updatedRoutine : routine
-                )
-            );
+                ),
+            }));
+
             return updatedRoutine;
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Error updating routine';
-            setError(errorMessage);
-            throw new Error(errorMessage);
+        } catch (error) {
+            console.error('Error updating routine:', error);
+            setError(error instanceof Error ? error.message : 'Error updating routine');
+            return null;
+        } finally {
+            setLoading(false);
         }
-    }, []);
+    };
 
-    // Delete a routine
-    const deleteRoutine = useCallback(async (id: string): Promise<void> => {
+    // Update exercise
+    const updateExercise = async (id: string, updates: Partial<Exercise>): Promise<Exercise | null> => {
         try {
-            setError(null);
-            await routineApi.deleteRoutine(id);
-            setRoutines(prev => prev.filter(routine => routine.id !== id));
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Error deleting routine';
-            setError(errorMessage);
-            throw new Error(errorMessage);
-        }
-    }, []);
+            setLoading(true);
+            const response = await apiService.exercises.update(id, {
+                name: updates.name,
+                description: updates.description,
+                duration: updates.duration,
+                intensity: updates.intensity,
+                work_type: updates.workType,
+                difficulty: updates.difficulty,
+                tags: updates.tags,
+                materials: updates.materials,
+                protection: updates.protection,
+                instructions: updates.instructions,
+                video_url: updates.videoUrl,
+                image_url: updates.imageUrl,
+                is_multi_timer: updates.isMultiTimer,
+                timers: updates.timers,
+                is_template: updates.isTemplate,
+                visibility: updates.visibility,
+                is_active: updates.isActive,
+                category_ids: updates.categoryIds,
+            });
 
-    // Duplicate a routine
-    const duplicateRoutine = useCallback(async (routine: Routine): Promise<Routine> => {
+            const updatedExercise: Exercise = {
+                ...response.exercise,
+                createdAt: new Date(response.exercise.created_at),
+                updatedAt: new Date(response.exercise.updated_at),
+            };
+
+            setState(prev => ({
+                ...prev,
+                exercises: prev.exercises.map(exercise =>
+                    exercise.id === id ? updatedExercise : exercise
+                ),
+            }));
+
+            return updatedExercise;
+        } catch (error) {
+            console.error('Error updating exercise:', error);
+            setError(error instanceof Error ? error.message : 'Error updating exercise');
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Delete routine
+    const deleteRoutine = async (id: string): Promise<boolean> => {
         try {
-            setError(null);
-            const apiRoutine = await routineApi.duplicateRoutine(routine.id);
-            const duplicatedRoutine = convertApiRoutine(apiRoutine);
+            setLoading(true);
+            await apiService.routines.delete(id);
 
-            setRoutines(prev => [...prev, duplicatedRoutine]);
-            return duplicatedRoutine;
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Error duplicating routine';
-            setError(errorMessage);
-            throw new Error(errorMessage);
+            setState(prev => ({
+                ...prev,
+                routines: prev.routines.filter(routine => routine.id !== id),
+            }));
+
+            return true;
+        } catch (error) {
+            console.error('Error deleting routine:', error);
+            setError(error instanceof Error ? error.message : 'Error deleting routine');
+            return false;
+        } finally {
+            setLoading(false);
         }
-    }, []);
+    };
+
+    // Delete exercise
+    const deleteExercise = async (id: string): Promise<boolean> => {
+        try {
+            setLoading(true);
+            await apiService.exercises.delete(id);
+
+            setState(prev => ({
+                ...prev,
+                exercises: prev.exercises.filter(exercise => exercise.id !== id),
+            }));
+
+            return true;
+        } catch (error) {
+            console.error('Error deleting exercise:', error);
+            setError(error instanceof Error ? error.message : 'Error deleting exercise');
+            return false;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Clone routine
+    const cloneRoutine = async (id: string, modifications?: Partial<Routine>): Promise<Routine | null> => {
+        try {
+            setLoading(true);
+            const response = await apiService.routines.clone(id, modifications);
+
+            const clonedRoutine: Routine = {
+                ...response.routine,
+                createdAt: new Date(response.routine.created_at),
+                updatedAt: new Date(response.routine.updated_at),
+            };
+
+            setState(prev => ({
+                ...prev,
+                routines: [...prev.routines, clonedRoutine],
+            }));
+
+            return clonedRoutine;
+        } catch (error) {
+            console.error('Error cloning routine:', error);
+            setError(error instanceof Error ? error.message : 'Error cloning routine');
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Clone exercise
+    const cloneExercise = async (id: string, modifications?: Partial<Exercise>): Promise<Exercise | null> => {
+        try {
+            setLoading(true);
+            const response = await apiService.exercises.clone(id, modifications);
+
+            const clonedExercise: Exercise = {
+                ...response.exercise,
+                createdAt: new Date(response.exercise.created_at),
+                updatedAt: new Date(response.exercise.updated_at),
+            };
+
+            setState(prev => ({
+                ...prev,
+                exercises: [...prev.exercises, clonedExercise],
+            }));
+
+            return clonedExercise;
+        } catch (error) {
+            console.error('Error cloning exercise:', error);
+            setError(error instanceof Error ? error.message : 'Error cloning exercise');
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    };
 
     // Toggle favorite status
-    const toggleFavorite = useCallback(async (routine: Routine): Promise<Routine> => {
+    const toggleRoutineFavorite = async (id: string): Promise<boolean> => {
         try {
-            setError(null);
-            const apiRoutine = await routineApi.toggleFavorite(routine.id, !routine.isFavorite);
-            const updatedRoutine = convertApiRoutine(apiRoutine);
+            const response = await apiService.routines.toggleFavorite(id);
 
-            setRoutines(prev =>
-                prev.map(r =>
-                    r.id === routine.id ? updatedRoutine : r
-                )
-            );
-            return updatedRoutine;
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Error updating favorite status';
-            setError(errorMessage);
-            throw new Error(errorMessage);
+            setState(prev => ({
+                ...prev,
+                routines: prev.routines.map(routine =>
+                    routine.id === id
+                        ? { ...routine, isFavorite: response.routine.is_favorite }
+                        : routine
+                ),
+            }));
+
+            return true;
+        } catch (error) {
+            console.error('Error toggling routine favorite:', error);
+            setError(error instanceof Error ? error.message : 'Error updating favorite status');
+            return false;
         }
-    }, []);
+    };
 
-    // Refresh routines
-    const refreshRoutines = useCallback(async (): Promise<void> => {
-        await loadRoutines();
-    }, [loadRoutines]);
+    const toggleExerciseFavorite = async (id: string): Promise<boolean> => {
+        try {
+            const response = await apiService.exercises.toggleFavorite(id);
 
-    // Get routine by ID
-    const getRoutineById = useCallback((id: string): Routine | undefined => {
-        return routines.find(routine => routine.id === id);
-    }, [routines]);
+            setState(prev => ({
+                ...prev,
+                exercises: prev.exercises.map(exercise =>
+                    exercise.id === id
+                        ? { ...exercise, isFavorite: response.exercise.is_favorite }
+                        : exercise
+                ),
+            }));
 
-    // Load routines on mount
-    useEffect(() => {
-        loadRoutines();
-    }, [loadRoutines]);
+            return true;
+        } catch (error) {
+            console.error('Error toggling exercise favorite:', error);
+            setError(error instanceof Error ? error.message : 'Error updating favorite status');
+            return false;
+        }
+    };
+
+    // Toggle active status
+    const toggleRoutineActive = async (id: string): Promise<boolean> => {
+        try {
+            const response = await apiService.routines.toggleActive(id);
+
+            setState(prev => ({
+                ...prev,
+                routines: prev.routines.map(routine =>
+                    routine.id === id
+                        ? { ...routine, isActive: response.routine.is_active }
+                        : routine
+                ),
+            }));
+
+            return true;
+        } catch (error) {
+            console.error('Error toggling routine active status:', error);
+            setError(error instanceof Error ? error.message : 'Error updating active status');
+            return false;
+        }
+    };
 
     return {
-        routines,
-        loading,
-        error,
+        // State
+        routines: state.routines,
+        exercises: state.exercises,
+        isLoading: state.isLoading,
+        error: state.error,
+
+        // Control functions
+        setError,
+
+        // Load functions
+        loadRoutines,
+        loadExercises,
+        getRoutine,
+        getExercise,
+
+        // CRUD functions - Routines
         createRoutine,
         updateRoutine,
         deleteRoutine,
-        duplicateRoutine,
-        toggleFavorite,
-        refreshRoutines,
-        getRoutineById,
+        cloneRoutine,
+        toggleRoutineFavorite,
+        toggleRoutineActive,
+
+        // CRUD functions - Exercises
+        createExercise,
+        updateExercise,
+        deleteExercise,
+        cloneExercise,
+        toggleExerciseFavorite,
     };
 };

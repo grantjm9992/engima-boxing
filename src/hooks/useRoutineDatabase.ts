@@ -1,517 +1,552 @@
-import { useState, useEffect } from 'react';
-import { 
-  RoutineCompletion, 
-  DailyStats, 
-  StudentAttendanceStats, 
-  CategoryStats 
-} from '../types/RoutineTypes';
-import { Category } from '../components/CategoryManager';
-import { PlannedClass } from '../types/ClassTypes';
-import { notionService } from '../services/NotionService';
+// src/hooks/useRoutineDatabase.ts
+import { useState, useEffect, useCallback } from 'react';
+import { apiService } from '../services/apiService';
 
-interface RoutineDatabaseState {
+export interface Category {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;
+  type: 'phase' | 'period' | 'load-type' | 'custom';
+  createdAt: Date;
+  isActive?: boolean;
+}
+
+export interface Tag {
+  id: string;
+  name: string;
+  color: string;
+  description?: string;
+  createdAt: Date;
+  isActive?: boolean;
+}
+
+export interface RoutineCompletion {
+  id: string;
+  routineId: string;
+  categoryId?: string;
+  completedAt: Date;
+  duration: number;
+  rating?: number;
+  notes?: string;
+  attendees: string[];
+  morningSession: boolean;
+  afternoonSession: boolean;
+  isFullDayComplete?: boolean;
+  completedBy: string;
+}
+
+export interface PlannedClass {
+  id: string;
+  title: string;
+  date: string;
+  startTime?: string;
+  endTime?: string;
+  routineId?: string;
+  classType: 'morning' | 'afternoon' | 'evening' | 'custom';
+  tags: string[];
+  totalDuration: number;
+  blocks: any[];
+  objective?: string;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  status?: 'scheduled' | 'completed' | 'cancelled';
+  maxParticipants?: number;
+  targetStudents?: string[];
+}
+
+interface DatabaseState {
   categories: Category[];
+  tags: Tag[];
   completions: RoutineCompletion[];
   plannedClasses: PlannedClass[];
-  categoryUsageData: {
-    categoryId: string;
-    timestamp: Date;
-    duration: number;
-    level: string;
-  }[];
   isLoading: boolean;
   error: string | null;
 }
 
 export const useRoutineDatabase = () => {
-  const [state, setState] = useState<RoutineDatabaseState>({
+  const [state, setState] = useState<DatabaseState>({
     categories: [],
+    tags: [],
     completions: [],
     plannedClasses: [],
-    categoryUsageData: [],
     isLoading: false,
-    error: null
+    error: null,
   });
 
-  // Load data from localStorage on mount
-  useEffect(() => {
+  // Loading and error handling
+  const setLoading = (loading: boolean) => {
+    setState(prev => ({ ...prev, isLoading: loading }));
+  };
+
+  const setError = (error: string | null) => {
+    setState(prev => ({ ...prev, error }));
+  };
+
+  // Load initial data
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
     try {
-      const savedCategories = localStorage.getItem('enigma-categories');
-      const savedCompletions = localStorage.getItem('enigma-routine-completions');
-      const savedCategoryUsage = localStorage.getItem('enigma-category-usage');
-      const savedPlannedClasses = localStorage.getItem('enigma-planned-classes');
+      const [categoriesResponse, tagsResponse, completionsResponse, classesResponse] = await Promise.all([
+        apiService.categories.getAll({ with_stats: true }),
+        apiService.tags.getAll({ with_stats: true }),
+        apiService.routineCompletions.getAll(),
+        apiService.plannedClasses.getAll(),
+      ]);
 
       setState(prev => ({
         ...prev,
-        categories: savedCategories ? JSON.parse(savedCategories).map((cat: any) => ({
+        categories: categoriesResponse.categories.map(cat => ({
           ...cat,
-          createdAt: new Date(cat.createdAt)
-        })) : [],
-        completions: savedCompletions ? JSON.parse(savedCompletions).map((comp: any) => ({
+          createdAt: new Date(cat.created_at),
+        })),
+        tags: tagsResponse.tags.map(tag => ({
+          ...tag,
+          createdAt: new Date(tag.created_at),
+        })),
+        completions: completionsResponse.completions?.map(comp => ({
           ...comp,
-          completedAt: new Date(comp.completedAt),
-          blocks: comp.blocks.map((block: any) => ({
-            ...block,
-            startTime: new Date(block.startTime),
-            endTime: new Date(block.endTime),
-            exercises: block.exercises.map((ex: any) => ({
-              ...ex,
-              startTime: new Date(ex.startTime),
-              endTime: new Date(ex.endTime)
-            }))
-          })),
-          exercises: comp.exercises.map((ex: any) => ({
-            ...ex,
-            startTime: new Date(ex.startTime),
-            endTime: new Date(ex.endTime)
-          }))
-        })) : [],
-        plannedClasses: savedPlannedClasses ? JSON.parse(savedPlannedClasses).map((cls: any) => ({
+          completedAt: new Date(comp.completed_at),
+        })) || [],
+        plannedClasses: classesResponse.classes?.map(cls => ({
           ...cls,
-          createdAt: new Date(cls.createdAt),
-          updatedAt: new Date(cls.updatedAt)
-        })) : [],
-        categoryUsageData: savedCategoryUsage ? JSON.parse(savedCategoryUsage).map((usage: any) => ({
-          ...usage,
-          timestamp: new Date(usage.timestamp)
-        })) : []
+          createdAt: new Date(cls.created_at),
+          updatedAt: new Date(cls.updated_at),
+        })) || [],
       }));
     } catch (error) {
       console.error('Error loading routine database:', error);
-      setState(prev => ({ ...prev, error: 'Error loading data' }));
+      setError(error instanceof Error ? error.message : 'Error loading data');
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  // Save categories to localStorage
-  const saveCategories = (categories: Category[]) => {
-    try {
-      localStorage.setItem('enigma-categories', JSON.stringify(categories));
-    } catch (error) {
-      console.error('Error saving categories:', error);
-    }
-  };
-
-  // Save completions to localStorage
-  const saveCompletions = (completions: RoutineCompletion[]) => {
-    try {
-      localStorage.setItem('enigma-routine-completions', JSON.stringify(completions));
-    } catch (error) {
-      console.error('Error saving completions:', error);
-    }
-  };
-
-  // Save planned classes to localStorage
-  const savePlannedClasses = (classes: PlannedClass[]) => {
-    try {
-      localStorage.setItem('enigma-planned-classes', JSON.stringify(classes));
-    } catch (error) {
-      console.error('Error saving planned classes:', error);
-    }
-  };
-
-  // Save category usage data to localStorage
-  const saveCategoryUsageData = (data: any[]) => {
-    try {
-      localStorage.setItem('enigma-category-usage', JSON.stringify(data));
-    } catch (error) {
-      console.error('Error saving category usage data:', error);
-    }
-  };
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   // Category management
-  const createCategory = (categoryData: Omit<Category, 'id' | 'createdAt'>) => {
-    const newCategory: Category = {
-      ...categoryData,
-      id: `category_${Date.now()}`,
-      createdAt: new Date()
-    };
+  const createCategory = async (categoryData: Omit<Category, 'id' | 'createdAt'>) => {
+    try {
+      setLoading(true);
+      const response = await apiService.categories.create({
+        name: categoryData.name,
+        description: categoryData.description,
+        color: categoryData.color,
+        type: categoryData.type,
+      });
 
-    const updatedCategories = [...state.categories, newCategory];
-    setState(prev => ({ ...prev, categories: updatedCategories }));
-    saveCategories(updatedCategories);
+      const newCategory: Category = {
+        ...response.category,
+        createdAt: new Date(response.category.created_at),
+      };
+
+      setState(prev => ({
+        ...prev,
+        categories: [...prev.categories, newCategory],
+      }));
+
+      return newCategory;
+    } catch (error) {
+      console.error('Error creating category:', error);
+      setError(error instanceof Error ? error.message : 'Error creating category');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateCategory = (id: string, updates: Partial<Category>) => {
-    const updatedCategories = state.categories.map(category =>
-      category.id === id 
-        ? { ...category, ...updates }
-        : category
-    );
-    setState(prev => ({ ...prev, categories: updatedCategories }));
-    saveCategories(updatedCategories);
+  const updateCategory = async (id: string, updates: Partial<Category>) => {
+    try {
+      setLoading(true);
+      const response = await apiService.categories.update(id, updates);
+
+      const updatedCategory: Category = {
+        ...response.category,
+        createdAt: new Date(response.category.created_at),
+      };
+
+      setState(prev => ({
+        ...prev,
+        categories: prev.categories.map(category =>
+            category.id === id ? updatedCategory : category
+        ),
+      }));
+
+      return updatedCategory;
+    } catch (error) {
+      console.error('Error updating category:', error);
+      setError(error instanceof Error ? error.message : 'Error updating category');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const deleteCategory = (id: string) => {
-    const updatedCategories = state.categories.filter(category => category.id !== id);
-    setState(prev => ({ ...prev, categories: updatedCategories }));
-    saveCategories(updatedCategories);
+  const deleteCategory = async (id: string) => {
+    try {
+      setLoading(true);
+      await apiService.categories.delete(id);
+
+      setState(prev => ({
+        ...prev,
+        categories: prev.categories.filter(category => category.id !== id),
+      }));
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      setError(error instanceof Error ? error.message : 'Error deleting category');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Tag management
+  const createTag = async (tagData: Omit<Tag, 'id' | 'createdAt'>) => {
+    try {
+      setLoading(true);
+      const response = await apiService.tags.create({
+        name: tagData.name,
+        color: tagData.color,
+        description: tagData.description,
+      });
+
+      const newTag: Tag = {
+        ...response.tag,
+        createdAt: new Date(response.tag.created_at),
+      };
+
+      setState(prev => ({
+        ...prev,
+        tags: [...prev.tags, newTag],
+      }));
+
+      return newTag;
+    } catch (error) {
+      console.error('Error creating tag:', error);
+      setError(error instanceof Error ? error.message : 'Error creating tag');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateTag = async (id: string, updates: Partial<Tag>) => {
+    try {
+      setLoading(true);
+      const response = await apiService.tags.update(id, updates);
+
+      const updatedTag: Tag = {
+        ...response.tag,
+        createdAt: new Date(response.tag.created_at),
+      };
+
+      setState(prev => ({
+        ...prev,
+        tags: prev.tags.map(tag =>
+            tag.id === id ? updatedTag : tag
+        ),
+      }));
+
+      return updatedTag;
+    } catch (error) {
+      console.error('Error updating tag:', error);
+      setError(error instanceof Error ? error.message : 'Error updating tag');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteTag = async (id: string) => {
+    try {
+      setLoading(true);
+      await apiService.tags.delete(id);
+
+      setState(prev => ({
+        ...prev,
+        tags: prev.tags.filter(tag => tag.id !== id),
+      }));
+    } catch (error) {
+      console.error('Error deleting tag:', error);
+      setError(error instanceof Error ? error.message : 'Error deleting tag');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Planned Classes management
-  const createPlannedClass = async (classData: Omit<PlannedClass, 'id' | 'createdAt' | 'updatedAt' | 'notionPageId'>) => {
-    const now = new Date();
-    let notionPageId: string | undefined = undefined;
-    
-    // Sincronizar con Notion si está configurado
-    if (notionService.isConfigured()) {
-      const pageId = await notionService.createClassEntry({
+  const createPlannedClass = async (classData: Omit<PlannedClass, 'id' | 'createdAt' | 'updatedAt'>) => {
+    try {
+      setLoading(true);
+      const response = await apiService.plannedClasses.create({
         title: classData.title,
+        description: classData.notes,
         date: classData.date,
-        tags: classData.tags,
-        totalDuration: classData.totalDuration,
+        start_time: classData.startTime,
+        end_time: classData.endTime,
+        routine_id: classData.routineId,
+        class_type: classData.classType,
+        max_participants: classData.maxParticipants,
+        target_students: classData.targetStudents,
         objective: classData.objective,
-        notes: classData.notes,
-        blocks: classData.blocks
+        blocks: classData.blocks,
+        tags: classData.tags,
       });
-      
-      if (pageId) {
-        notionPageId = pageId;
-      }
-    }
-    
-    const newClass: PlannedClass = {
-      ...classData,
-      id: `class_${Date.now()}`,
-      createdAt: now,
-      updatedAt: now,
-      notionPageId
-    };
 
-    const updatedClasses = [...state.plannedClasses, newClass];
-    setState(prev => ({ ...prev, plannedClasses: updatedClasses }));
-    savePlannedClasses(updatedClasses);
-    
-    return newClass;
+      const newClass: PlannedClass = {
+        ...response.class,
+        createdAt: new Date(response.class.created_at),
+        updatedAt: new Date(response.class.updated_at),
+      };
+
+      setState(prev => ({
+        ...prev,
+        plannedClasses: [...prev.plannedClasses, newClass],
+      }));
+
+      return newClass;
+    } catch (error) {
+      console.error('Error creating planned class:', error);
+      setError(error instanceof Error ? error.message : 'Error creating planned class');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updatePlannedClass = async (id: string, updates: Partial<PlannedClass>) => {
-    const classToUpdate = state.plannedClasses.find(cls => cls.id === id);
-    if (!classToUpdate) return;
-    
-    const updatedClass = {
-      ...classToUpdate,
-      ...updates,
-      updatedAt: new Date()
-    };
-    
-    // Sincronizar con Notion si está configurado y ya existe en Notion
-    if (notionService.isConfigured() && updatedClass.notionPageId) {
-      await notionService.updateClassEntry(
-        updatedClass.notionPageId,
-        {
-          title: updatedClass.title,
-          date: updatedClass.date,
-          tags: updatedClass.tags,
-          totalDuration: updatedClass.totalDuration,
-          objective: updatedClass.objective,
-          notes: updatedClass.notes,
-          blocks: updatedClass.blocks
-        }
-      );
+    try {
+      setLoading(true);
+      const response = await apiService.plannedClasses.update(id, {
+        title: updates.title,
+        description: updates.notes,
+        date: updates.date,
+        start_time: updates.startTime,
+        end_time: updates.endTime,
+        routine_id: updates.routineId,
+        class_type: updates.classType,
+        max_participants: updates.maxParticipants,
+        target_students: updates.targetStudents,
+        objective: updates.objective,
+        blocks: updates.blocks,
+        tags: updates.tags,
+      });
+
+      const updatedClass: PlannedClass = {
+        ...response.class,
+        createdAt: new Date(response.class.created_at),
+        updatedAt: new Date(response.class.updated_at),
+      };
+
+      setState(prev => ({
+        ...prev,
+        plannedClasses: prev.plannedClasses.map(cls =>
+            cls.id === id ? updatedClass : cls
+        ),
+      }));
+
+      return updatedClass;
+    } catch (error) {
+      console.error('Error updating planned class:', error);
+      setError(error instanceof Error ? error.message : 'Error updating planned class');
+      throw error;
+    } finally {
+      setLoading(false);
     }
-    
-    const updatedClasses = state.plannedClasses.map(cls =>
-      cls.id === id ? updatedClass : cls
-    );
-    
-    setState(prev => ({ ...prev, plannedClasses: updatedClasses }));
-    savePlannedClasses(updatedClasses);
   };
 
   const deletePlannedClass = async (id: string) => {
-    const classToDelete = state.plannedClasses.find(cls => cls.id === id);
-    
-    // Eliminar de Notion si está configurado y existe en Notion
-    if (classToDelete?.notionPageId && notionService.isConfigured()) {
-      await notionService.deleteClassEntry(classToDelete.notionPageId);
+    try {
+      setLoading(true);
+      await apiService.plannedClasses.delete(id);
+
+      setState(prev => ({
+        ...prev,
+        plannedClasses: prev.plannedClasses.filter(cls => cls.id !== id),
+      }));
+    } catch (error) {
+      console.error('Error deleting planned class:', error);
+      setError(error instanceof Error ? error.message : 'Error deleting planned class');
+      throw error;
+    } finally {
+      setLoading(false);
     }
-    
-    const updatedClasses = state.plannedClasses.filter(cls => cls.id !== id);
-    setState(prev => ({ ...prev, plannedClasses: updatedClasses }));
-    savePlannedClasses(updatedClasses);
   };
 
   const duplicatePlannedClass = async (id: string, newDate?: string) => {
-    const classToDuplicate = state.plannedClasses.find(cls => cls.id === id);
-    if (!classToDuplicate) return;
-    
-    const now = new Date();
-    const newClass: Omit<PlannedClass, 'id' | 'createdAt' | 'updatedAt' | 'notionPageId'> = {
-      title: `${classToDuplicate.title} (Copia)`,
-      date: newDate || classToDuplicate.date,
-      tags: [...classToDuplicate.tags],
-      totalDuration: classToDuplicate.totalDuration,
-      blocks: JSON.parse(JSON.stringify(classToDuplicate.blocks)), // Deep copy
-      objective: classToDuplicate.objective,
-      notes: classToDuplicate.notes
-    };
-    
-    return await createPlannedClass(newClass);
-  };
+    try {
+      setLoading(true);
+      const response = await apiService.plannedClasses.duplicate(id, {
+        date: newDate,
+      });
 
-  // Track category usage
-  const trackCategoryUsage = (categoryId: string, duration: number, level: string = 'intermediate') => {
-    const newUsageData = [
-      ...state.categoryUsageData,
-      {
-        categoryId,
-        timestamp: new Date(),
-        duration,
-        level
-      }
-    ];
-    
-    setState(prev => ({ ...prev, categoryUsageData: newUsageData }));
-    saveCategoryUsageData(newUsageData);
+      const duplicatedClass: PlannedClass = {
+        ...response.class,
+        createdAt: new Date(response.class.created_at),
+        updatedAt: new Date(response.class.updated_at),
+      };
+
+      setState(prev => ({
+        ...prev,
+        plannedClasses: [...prev.plannedClasses, duplicatedClass],
+      }));
+
+      return duplicatedClass;
+    } catch (error) {
+      console.error('Error duplicating planned class:', error);
+      setError(error instanceof Error ? error.message : 'Error duplicating planned class');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Completion management
-  const addCompletion = (completionData: Omit<RoutineCompletion, 'id'>) => {
-    const newCompletion: RoutineCompletion = {
-      ...completionData,
-      id: `completion_${Date.now()}`
-    };
-
-    // Check if this completes a full day (both morning and afternoon)
-    const sameDay = state.completions.filter(comp => {
-      const compDate = comp.completedAt.toDateString();
-      const newDate = newCompletion.completedAt.toDateString();
-      return compDate === newDate;
-    });
-
-    const hasMorning = sameDay.some(comp => comp.morningSession) || newCompletion.morningSession;
-    const hasAfternoon = sameDay.some(comp => comp.afternoonSession) || newCompletion.afternoonSession;
-    
-    if (hasMorning && hasAfternoon) {
-      newCompletion.isFullDayComplete = true;
-      // Update existing completions for the same day
-      const updatedCompletions = state.completions.map(comp => {
-        const compDate = comp.completedAt.toDateString();
-        const newDate = newCompletion.completedAt.toDateString();
-        return compDate === newDate ? { ...comp, isFullDayComplete: true } : comp;
+  const addCompletion = async (completionData: Omit<RoutineCompletion, 'id'>) => {
+    try {
+      setLoading(true);
+      const response = await apiService.routineCompletions.create({
+        routine_id: completionData.routineId,
+        category_id: completionData.categoryId,
+        completed_at: completionData.completedAt.toISOString(),
+        duration: completionData.duration,
+        rating: completionData.rating,
+        notes: completionData.notes,
+        attendees: completionData.attendees,
+        morning_session: completionData.morningSession,
+        afternoon_session: completionData.afternoonSession,
+        completed_by: completionData.completedBy,
       });
-      setState(prev => ({ ...prev, completions: [...updatedCompletions, newCompletion] }));
-      saveCompletions([...updatedCompletions, newCompletion]);
-    } else {
-      const updatedCompletions = [...state.completions, newCompletion];
-      setState(prev => ({ ...prev, completions: updatedCompletions }));
-      saveCompletions(updatedCompletions);
+
+      const newCompletion: RoutineCompletion = {
+        ...response.completion,
+        completedAt: new Date(response.completion.completed_at),
+      };
+
+      setState(prev => ({
+        ...prev,
+        completions: [...prev.completions, newCompletion],
+      }));
+
+      return newCompletion;
+    } catch (error) {
+      console.error('Error adding completion:', error);
+      setError(error instanceof Error ? error.message : 'Error adding completion');
+      throw error;
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // Track category usage for each exercise
-    newCompletion.exercises.forEach(exercise => {
-      if (exercise.tags && exercise.tags.length > 0) {
-        exercise.tags.forEach(tag => {
-          trackCategoryUsage(tag, exercise.duration, 'intermediate');
-        });
+  const deleteCompletion = async (id: string) => {
+    try {
+      setLoading(true);
+      await apiService.routineCompletions.delete(id);
+
+      setState(prev => ({
+        ...prev,
+        completions: prev.completions.filter(completion => completion.id !== id),
+      }));
+    } catch (error) {
+      console.error('Error deleting completion:', error);
+      setError(error instanceof Error ? error.message : 'Error deleting completion');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Analytics functions using API
+  const getDailyStats = async (studentIds?: string[], dateRange?: { start: Date; end: Date }) => {
+    try {
+      const params: any = {};
+      if (studentIds) params.student_ids = studentIds.join(',');
+      if (dateRange) {
+        params.start_date = dateRange.start.toISOString().split('T')[0];
+        params.end_date = dateRange.end.toISOString().split('T')[0];
       }
-    });
+
+      const response = await apiService.routineCompletions.getDailyStats(params);
+      return response.statistics || [];
+    } catch (error) {
+      console.error('Error getting daily stats:', error);
+      return [];
+    }
   };
 
-  const deleteCompletion = (id: string) => {
-    const updatedCompletions = state.completions.filter(completion => completion.id !== id);
-    setState(prev => ({ ...prev, completions: updatedCompletions }));
-    saveCompletions(updatedCompletions);
-  };
-
-  // Analytics functions
-  const getDailyStats = (startDate: Date, endDate: Date): DailyStats[] => {
-    const filteredCompletions = state.completions.filter(completion => {
-      const completionDate = new Date(completion.completedAt);
-      return completionDate >= startDate && completionDate <= endDate;
-    });
-
-    const statsMap = new Map<string, DailyStats>();
-    
-    filteredCompletions.forEach(completion => {
-      const dateKey = completion.completedAt.toISOString().split('T')[0];
-      
-      if (!statsMap.has(dateKey)) {
-        statsMap.set(dateKey, {
-          date: new Date(dateKey),
-          totalDuration: 0,
-          workTypeBreakdown: {
-            strength: 0,
-            coordination: 0,
-            reaction: 0,
-            technique: 0,
-            cardio: 0,
-            flexibility: 0,
-            sparring: 0,
-            conditioning: 0
-          },
-          attendanceByStudent: {},
-          completedRoutines: [],
-          morningCompleted: false,
-          afternoonCompleted: false,
-          fullDayCompleted: false
-        });
+  const getStudentStats = async (dateRange?: { start: Date; end: Date }) => {
+    try {
+      const params: any = {};
+      if (dateRange) {
+        params.start_date = dateRange.start.toISOString().split('T')[0];
+        params.end_date = dateRange.end.toISOString().split('T')[0];
       }
-      
-      const dayStats = statsMap.get(dateKey)!;
-      dayStats.totalDuration += completion.duration;
-      dayStats.completedRoutines.push(completion.routineId);
-      
-      if (completion.morningSession) dayStats.morningCompleted = true;
-      if (completion.afternoonSession) dayStats.afternoonCompleted = true;
-      dayStats.fullDayCompleted = dayStats.morningCompleted && dayStats.afternoonCompleted;
-      
-      // Calculate work type breakdown
-      const totalExerciseTime = completion.exercises.reduce((sum, ex) => sum + ex.duration, 0);
-      completion.exercises.forEach(exercise => {
-        const percentage = totalExerciseTime > 0 ? (exercise.duration / totalExerciseTime) * 100 : 0;
-        dayStats.workTypeBreakdown[exercise.workType] += percentage;
-      });
-      
-      // Track attendance
-      completion.attendees.forEach(studentId => {
-        dayStats.attendanceByStudent[studentId] = (dayStats.attendanceByStudent[studentId] || 0) + completion.duration;
-      });
-    });
-    
-    return Array.from(statsMap.values()).sort((a, b) => b.date.getTime() - a.date.getTime());
+
+      const response = await apiService.routineCompletions.getStudentStats(params);
+      return response.statistics || [];
+    } catch (error) {
+      console.error('Error getting student stats:', error);
+      return [];
+    }
   };
 
-  const getStudentStats = (studentIds: string[]): StudentAttendanceStats[] => {
-    const statsMap = new Map<string, StudentAttendanceStats>();
-    
-    studentIds.forEach(studentId => {
-      statsMap.set(studentId, {
-        studentId,
-        studentName: '', // Will be filled by the component
-        totalSessions: 0,
-        totalMinutes: 0,
-        categoryBreakdown: {},
-        workTypeBreakdown: {
-          strength: 0,
-          coordination: 0,
-          reaction: 0,
-          technique: 0,
-          cardio: 0,
-          flexibility: 0,
-          sparring: 0,
-          conditioning: 0
-        },
-        averageRating: 0,
-        lastSession: new Date(0),
-        consistency: 0
-      });
-    });
-    
-    state.completions.forEach(completion => {
-      completion.attendees.forEach(studentId => {
-        const stats = statsMap.get(studentId);
-        if (stats) {
-          stats.totalSessions++;
-          stats.totalMinutes += completion.duration;
-          
-          // Calculate work type breakdown
-          const totalExerciseTime = completion.exercises.reduce((sum, ex) => sum + ex.duration, 0);
-          completion.exercises.forEach(exercise => {
-            const percentage = totalExerciseTime > 0 ? (exercise.duration / totalExerciseTime) : 0;
-            stats.workTypeBreakdown[exercise.workType] += percentage;
-          });
-          
-          if (completion.rating) {
-            stats.averageRating = (stats.averageRating * (stats.totalSessions - 1) + completion.rating) / stats.totalSessions;
-          }
-          
-          if (completion.completedAt > stats.lastSession) {
-            stats.lastSession = completion.completedAt;
-          }
-        }
-      });
-    });
-    
-    return Array.from(statsMap.values()).filter(stats => stats.totalSessions > 0);
-  };
+  const getCategoryStats = async (dateRange?: { start: Date; end: Date }) => {
+    try {
+      const params: any = {};
+      if (dateRange) {
+        params.start_date = dateRange.start.toISOString().split('T')[0];
+        params.end_date = dateRange.end.toISOString().split('T')[0];
+      }
 
-  const getCategoryStats = (): CategoryStats[] => {
-    const statsMap = new Map<string, CategoryStats>();
-    
-    state.completions.forEach(completion => {
-      completion.exercises.forEach(exercise => {
-        if (exercise.tags && exercise.tags.length > 0) {
-          exercise.tags.forEach(tag => {
-            if (!statsMap.has(tag)) {
-              statsMap.set(tag, {
-                categoryId: tag,
-                categoryName: state.categories.find(c => c.id === tag)?.name || 'Desconocida',
-                totalSessions: 0,
-                totalMinutes: 0,
-                averageRating: 0,
-                studentParticipation: {},
-                workTypeDistribution: {
-                  strength: 0,
-                  coordination: 0,
-                  reaction: 0,
-                  technique: 0,
-                  cardio: 0,
-                  flexibility: 0,
-                  sparring: 0,
-                  conditioning: 0
-                },
-                trendsOverTime: []
-              });
-            }
-            
-            const stats = statsMap.get(tag)!;
-            stats.totalSessions++;
-            stats.totalMinutes += exercise.duration;
-            
-            if (completion.rating) {
-              stats.averageRating = (stats.averageRating * (stats.totalSessions - 1) + completion.rating) / stats.totalSessions;
-            }
-            
-            completion.attendees.forEach(studentId => {
-              stats.studentParticipation[studentId] = (stats.studentParticipation[studentId] || 0) + exercise.duration;
-            });
-            
-            stats.workTypeDistribution[exercise.workType] += exercise.duration;
-          });
-        }
-      });
-    });
-    
-    return Array.from(statsMap.values());
+      const response = await apiService.routineCompletions.getCategoryStats(params);
+      return response.statistics || [];
+    } catch (error) {
+      console.error('Error getting category stats:', error);
+      return [];
+    }
   };
 
   // Export functionality
-  const exportData = () => {
-    const data = {
-      categories: state.categories,
-      completions: state.completions,
-      plannedClasses: state.plannedClasses,
-      categoryUsageData: state.categoryUsageData,
-      exportDate: new Date().toISOString(),
-      version: '1.0'
-    };
-
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `enigma-data-export-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const exportData = async () => {
+    try {
+      const response = await apiService.routineCompletions.exportData();
+      if (response.download_url) {
+        window.open(response.download_url, '_blank');
+      }
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      setError(error instanceof Error ? error.message : 'Error exporting data');
+    }
   };
 
   return {
     // State
     categories: state.categories,
+    tags: state.tags,
     completions: state.completions,
     plannedClasses: state.plannedClasses,
-    categoryUsageData: state.categoryUsageData,
     isLoading: state.isLoading,
     error: state.error,
+
+    // Control functions
+    loadData,
+    setError,
 
     // Category management
     createCategory,
     updateCategory,
     deleteCategory,
-    trackCategoryUsage,
+
+    // Tag management
+    createTag,
+    updateTag,
+    deleteTag,
 
     // Planned Classes management
     createPlannedClass,
@@ -529,6 +564,6 @@ export const useRoutineDatabase = () => {
     getCategoryStats,
 
     // Export
-    exportData
+    exportData,
   };
 };

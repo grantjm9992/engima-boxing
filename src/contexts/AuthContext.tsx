@@ -1,4 +1,3 @@
-// src/contexts/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, AuthState, LoginCredentials, PasswordChangeData, UserProfileUpdateData } from '../types/UserTypes';
 import { userService } from '../services/UserService';
@@ -8,8 +7,8 @@ interface AuthContextType extends AuthState {
   logout: () => Promise<void>;
   updateProfile: (data: UserProfileUpdateData) => Promise<User>;
   changePassword: (data: PasswordChangeData) => Promise<User>;
-  refreshUser: () => Promise<void>;
   isFirstLogin: boolean;
+  clearError: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,53 +34,47 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   });
   const [isFirstLogin, setIsFirstLogin] = useState(false);
 
-  // Initialize authentication state
+  // Initialize user session on app start
   useEffect(() => {
-    const initializeAuth = async () => {
-      try {
-        const token = localStorage.getItem('auth_token');
-        if (token) {
-          const currentUser = await userService.refreshCurrentUser();
-          if (currentUser) {
-            setAuthState({
-              user: currentUser,
-              isAuthenticated: true,
-              isLoading: false,
-              error: null
-            });
+    initializeSession();
+  }, []);
 
-            // Check if user has temporary password (first login)
-            setIsFirstLogin(!!currentUser.tempPassword);
-          } else {
-            // Token is invalid
-            setAuthState({
-              user: null,
-              isAuthenticated: false,
-              isLoading: false,
-              error: null
-            });
-          }
-        } else {
-          setAuthState({
-            user: null,
-            isAuthenticated: false,
-            isLoading: false,
-            error: null
-          });
-        }
-      } catch (error) {
-        console.error('Authentication initialization failed:', error);
+  const initializeSession = async () => {
+    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      const user = await userService.initializeSession();
+
+      if (user) {
+        setAuthState({
+          user,
+          isAuthenticated: true,
+          isLoading: false,
+          error: null
+        });
+
+        // Check if user has temp password (first login)
+        setIsFirstLogin(!!user.tempPassword);
+      } else {
         setAuthState({
           user: null,
           isAuthenticated: false,
           isLoading: false,
-          error: error instanceof Error ? error.message : 'Authentication failed'
+          error: null
         });
+        setIsFirstLogin(false);
       }
-    };
-
-    initializeAuth();
-  }, []);
+    } catch (error) {
+      console.error('Session initialization failed:', error);
+      setAuthState({
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: null // Don't show error for failed session init
+      });
+      setIsFirstLogin(false);
+    }
+  };
 
   const login = async (credentials: LoginCredentials): Promise<User> => {
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -96,12 +89,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         error: null
       });
 
-      // Check if user has temporary password (first login)
+      // Check if this is first login (user has temp password)
       setIsFirstLogin(!!user.tempPassword);
 
       return user;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Login failed';
+      const errorMessage = error instanceof Error ? error.message : 'Error al iniciar sesión';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
@@ -112,35 +105,44 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const logout = async (): Promise<void> => {
-    try {
-      await userService.logout();
-    } finally {
-      setAuthState({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false,
-        error: null
-      });
-      setIsFirstLogin(false);
-    }
-  };
-
-  const updateProfile = async (data: UserProfileUpdateData): Promise<User> => {
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      const updatedUser = await userService.updateProfile(data);
+      await userService.logout();
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Continue with logout even if API call fails
+    }
 
-      setAuthState(prev => ({
-        ...prev,
+    setAuthState({
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      error: null
+    });
+    setIsFirstLogin(false);
+  };
+
+  const updateProfile = async (data: UserProfileUpdateData): Promise<User> => {
+    if (!authState.user) {
+      throw new Error('No hay usuario autenticado');
+    }
+
+    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      const updatedUser = await userService.updateUserProfile(authState.user.id, data);
+
+      setAuthState({
         user: updatedUser,
+        isAuthenticated: true,
         isLoading: false,
         error: null
-      }));
+      });
 
       return updatedUser;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Profile update failed';
+      const errorMessage = error instanceof Error ? error.message : 'Error al actualizar perfil';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
@@ -151,24 +153,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const changePassword = async (data: PasswordChangeData): Promise<User> => {
+    if (!authState.user) {
+      throw new Error('No hay usuario autenticado');
+    }
+
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      const updatedUser = await userService.changePassword(data);
+      const updatedUser = await userService.changePassword(authState.user.id, data);
 
-      setAuthState(prev => ({
-        ...prev,
+      setAuthState({
         user: updatedUser,
+        isAuthenticated: true,
         isLoading: false,
         error: null
-      }));
+      });
 
-      // Clear first login flag after password change
+      // Password changed successfully, no longer first login
       setIsFirstLogin(false);
 
       return updatedUser;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Password change failed';
+      const errorMessage = error instanceof Error ? error.message : 'Error al cambiar contraseña';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
@@ -178,34 +184,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const refreshUser = async (): Promise<void> => {
-    try {
-      const currentUser = await userService.refreshCurrentUser();
-      if (currentUser) {
-        setAuthState(prev => ({
-          ...prev,
-          user: currentUser,
-          error: null
-        }));
-        setIsFirstLogin(!!currentUser.tempPassword);
-      }
-    } catch (error) {
-      console.error('Failed to refresh user:', error);
-    }
-  };
-
-  const contextValue: AuthContextType = {
-    ...authState,
-    login,
-    logout,
-    updateProfile,
-    changePassword,
-    refreshUser,
-    isFirstLogin,
+  const clearError = () => {
+    setAuthState(prev => ({ ...prev, error: null }));
   };
 
   return (
-      <AuthContext.Provider value={contextValue}>
+      <AuthContext.Provider
+          value={{
+            ...authState,
+            login,
+            logout,
+            updateProfile,
+            changePassword,
+            isFirstLogin,
+            clearError
+          }}
+      >
         {children}
       </AuthContext.Provider>
   );

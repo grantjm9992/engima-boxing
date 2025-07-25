@@ -1,251 +1,271 @@
 // src/services/UserService.ts
-import {
-  User,
-  LoginCredentials,
-  UserRegistrationData,
-  UserProfileUpdateData,
-  PasswordChangeData
-} from '../types/UserTypes';
-import { apiService } from './ApiService';
+import { User, LoginCredentials, UserProfileUpdateData, PasswordChangeData, UserRegistrationData } from '../types/UserTypes';
+import { apiService } from './apiService';
 
 class UserService {
   private currentUser: User | null = null;
+  private readonly currentUserKey = 'enigma-current-user';
 
   constructor() {
-    this.initializeService();
+    this.loadCurrentUser();
   }
 
-  private async initializeService(): Promise<void> {
+  private loadCurrentUser(): void {
     try {
-      const token = localStorage.getItem('auth_token');
-      if (token) {
-        const response = await apiService.getCurrentUser();
-        this.currentUser = response.user;
+      const saved = localStorage.getItem(this.currentUserKey);
+      if (saved) {
+        const parsedUser = JSON.parse(saved);
+        this.currentUser = {
+          ...parsedUser,
+          createdAt: new Date(parsedUser.createdAt),
+          updatedAt: new Date(parsedUser.updatedAt),
+          tempPasswordExpiry: parsedUser.tempPasswordExpiry ? new Date(parsedUser.tempPasswordExpiry) : undefined,
+          lastLogin: parsedUser.lastLogin ? new Date(parsedUser.lastLogin) : undefined
+        };
       }
     } catch (error) {
-      console.error('Failed to initialize user service:', error);
-      localStorage.removeItem('auth_token');
-    }
-  }
-
-  // Authentication methods
-  async login(credentials: LoginCredentials): Promise<User> {
-    try {
-      const response = await apiService.login(credentials);
-      this.currentUser = response.user;
-      return response.user;
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Login failed');
-    }
-  }
-
-  async logout(): Promise<void> {
-    try {
-      await apiService.logout();
-    } finally {
+      console.error('Error loading current user:', error);
       this.currentUser = null;
     }
   }
 
-  getCurrentUser(): User | null {
+  private saveCurrentUser(): void {
+    try {
+      if (this.currentUser) {
+        localStorage.setItem(this.currentUserKey, JSON.stringify(this.currentUser));
+      } else {
+        localStorage.removeItem(this.currentUserKey);
+      }
+    } catch (error) {
+      console.error('Error saving current user:', error);
+    }
+  }
+
+  private mapApiUserToUser(apiUser: any): User {
+    return {
+      id: apiUser.id,
+      email: apiUser.email,
+      firstName: apiUser.first_name,
+      lastName: apiUser.last_name,
+      role: apiUser.role,
+      subscriptionPlan: apiUser.subscription_plan || 'basic',
+      tempPassword: apiUser.temp_password,
+      tempPasswordExpiry: apiUser.temp_password_expiry ? new Date(apiUser.temp_password_expiry) : undefined,
+      isActive: apiUser.is_active,
+      isEmailVerified: apiUser.is_email_verified,
+      phone: apiUser.phone,
+      profilePicture: apiUser.profile_picture,
+      lastLogin: apiUser.last_login ? new Date(apiUser.last_login) : undefined,
+      createdAt: new Date(apiUser.created_at),
+      updatedAt: new Date(apiUser.updated_at)
+    };
+  }
+
+  // Login method that matches the existing interface
+  public async login(credentials: LoginCredentials): Promise<User> {
+    try {
+      const response = await apiService.login({
+        email: credentials.email,
+        password: credentials.password
+      });
+
+      // Store the token
+      localStorage.setItem('auth-token', response.token);
+
+      // Map the API user to our User type
+      const user = this.mapApiUserToUser(response.user);
+
+      this.currentUser = user;
+      this.saveCurrentUser();
+
+      return user;
+    } catch (error) {
+      console.error('Login failed:', error);
+      throw error;
+    }
+  }
+
+  // Logout method
+  public async logout(): Promise<void> {
+    try {
+      await apiService.logout();
+    } catch (error) {
+      console.error('Logout API call failed:', error);
+      // Continue with logout even if API call fails
+    }
+
+    localStorage.removeItem('auth-token');
+    this.currentUser = null;
+    this.saveCurrentUser();
+  }
+
+  // Get current user
+  public getCurrentUser(): User | null {
     return this.currentUser;
   }
 
-  async refreshCurrentUser(): Promise<User | null> {
+  // Check if user is authenticated
+  public isAuthenticated(): boolean {
+    return this.currentUser !== null && localStorage.getItem('auth-token') !== null;
+  }
+
+  // Update user profile
+  public async updateUserProfile(userId: string, profileData: UserProfileUpdateData): Promise<User> {
     try {
-      const response = await apiService.getCurrentUser();
-      this.currentUser = response.user;
-      return response.user;
+      const response = await apiService.updateProfile({
+        first_name: profileData.firstName,
+        last_name: profileData.lastName,
+        phone: profileData.phone,
+        profile_picture: profileData.profilePicture
+      });
+
+      const updatedUser = this.mapApiUserToUser(response.user);
+
+      if (this.currentUser && this.currentUser.id === userId) {
+        this.currentUser = updatedUser;
+        this.saveCurrentUser();
+      }
+
+      return updatedUser;
     } catch (error) {
+      console.error('Profile update failed:', error);
+      throw error;
+    }
+  }
+
+  // Change password
+  public async changePassword(userId: string, passwordData: PasswordChangeData): Promise<User> {
+    try {
+      const response = await apiService.changePassword({
+        old_password: passwordData.oldPassword,
+        new_password: passwordData.newPassword,
+        new_password_confirmation: passwordData.newPassword
+      });
+
+      const updatedUser = this.mapApiUserToUser(response.user);
+
+      if (this.currentUser && this.currentUser.id === userId) {
+        this.currentUser = updatedUser;
+        this.saveCurrentUser();
+      }
+
+      return updatedUser;
+    } catch (error) {
+      console.error('Password change failed:', error);
+      throw error;
+    }
+  }
+
+  // Initialize user session (check if token is valid)
+  public async initializeSession(): Promise<User | null> {
+    const token = localStorage.getItem('auth-token');
+
+    if (!token) {
       this.currentUser = null;
+      this.saveCurrentUser();
+      return null;
+    }
+
+    try {
+      const response = await apiService.me();
+      const user = this.mapApiUserToUser(response.user);
+
+      this.currentUser = user;
+      this.saveCurrentUser();
+
+      return user;
+    } catch (error) {
+      console.error('Session initialization failed:', error);
+      // Token is invalid, clear it
+      localStorage.removeItem('auth-token');
+      this.currentUser = null;
+      this.saveCurrentUser();
       return null;
     }
   }
 
-  isAuthenticated(): boolean {
-    return this.currentUser !== null && localStorage.getItem('auth_token') !== null;
-  }
-
-  // Profile management
-  async updateProfile(data: UserProfileUpdateData): Promise<User> {
+  // Register user (for admin use)
+  public async registerUser(userData: UserRegistrationData): Promise<{ user: User; tempPassword: string }> {
     try {
-      const response = await apiService.updateProfile(data);
-      this.currentUser = response.user;
-      return response.user;
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Profile update failed');
-    }
-  }
-
-  async changePassword(data: PasswordChangeData): Promise<User> {
-    try {
-      const response = await apiService.changePassword(data);
-      this.currentUser = response.user;
-      return response.user;
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Password change failed');
-    }
-  }
-
-  // User management (admin/trainer only)
-  async getAllUsers(filters?: {
-    role?: string;
-    active?: boolean;
-    search?: string;
-    sortBy?: string;
-    sortDirection?: 'asc' | 'desc';
-    page?: number;
-    perPage?: number;
-  }): Promise<{ users: User[]; pagination: any }> {
-    try {
-      const response = await apiService.getUsers({
-        role: filters?.role,
-        active: filters?.active,
-        search: filters?.search,
-        sort_by: filters?.sortBy,
-        sort_direction: filters?.sortDirection,
-        page: filters?.page,
-        per_page: filters?.perPage,
+      const response = await apiService.users.create({
+        email: userData.email,
+        role: userData.role,
+        subscription_plan: userData.subscriptionPlan,
+        first_name: userData.firstName,
+        last_name: userData.lastName,
+        phone: userData.phone
       });
 
-      return {
-        users: response.data,
-        pagination: response.pagination,
-      };
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Failed to fetch users');
-    }
-  }
-
-  async getUser(id: string): Promise<User> {
-    try {
-      const response = await apiService.getUser(id);
-      return response.user;
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Failed to fetch user');
-    }
-  }
-
-  async createUser(userData: UserRegistrationData): Promise<{ user: User; tempPassword: string }> {
-    try {
-      const response = await apiService.createUser(userData);
-      return {
-        user: response.user,
-        tempPassword: response.temp_password,
-      };
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'User creation failed');
-    }
-  }
-
-  async updateUser(id: string, userData: Partial<User>): Promise<User> {
-    try {
-      const response = await apiService.updateUser(id, userData);
-      return response.user;
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'User update failed');
-    }
-  }
-
-  async deleteUser(id: string): Promise<void> {
-    try {
-      await apiService.deleteUser(id);
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'User deletion failed');
-    }
-  }
-
-  async resetPassword(email: string): Promise<{ user: User; tempPassword: string }> {
-    try {
-      const userResponse = await apiService.getUsers({ search: email });
-      const user = userResponse.data.find(u => u.email === email);
-
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      const response = await apiService.resetUserPassword(user.id.toString());
+      const user = this.mapApiUserToUser(response.user);
 
       return {
         user,
-        tempPassword: response.temp_password,
+        tempPassword: response.temp_password || ''
       };
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Password reset failed');
+      console.error('User registration failed:', error);
+      throw error;
     }
   }
 
-  async toggleUserActive(id: string): Promise<User> {
+  // Get all users (admin only)
+  public async getAllUsers(): Promise<User[]> {
     try {
-      const response = await apiService.toggleUserActive(id);
-      return response.user;
+      const response = await apiService.users.getAll();
+      return response.users.map(apiUser => this.mapApiUserToUser(apiUser));
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Failed to toggle user status');
+      console.error('Failed to get all users:', error);
+      throw error;
     }
   }
 
-  async getUserStatistics(): Promise<{
-    totalUsers: number;
-    activeUsers: number;
-    byRole: Record<string, number>;
-    bySubscription: Record<string, number>;
-    recentLogins: number;
-    pendingEmailVerification: number;
-  }> {
+  // Toggle user active status
+  public async toggleUserActive(userId: string, isActive: boolean): Promise<User> {
     try {
-      const stats = await apiService.getUserStatistics();
-      return {
-        totalUsers: stats.total_users,
-        activeUsers: stats.active_users,
-        byRole: stats.by_role,
-        bySubscription: stats.by_subscription,
-        recentLogins: stats.recent_logins,
-        pendingEmailVerification: stats.pending_email_verification,
-      };
+      const response = await apiService.users.toggleActive(userId);
+      return this.mapApiUserToUser(response.user);
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Failed to fetch statistics');
+      console.error('Failed to toggle user active status:', error);
+      throw error;
     }
   }
 
-  // Email simulation methods (for development)
-  sendWelcomeEmail(user: User, tempPassword: string): void {
-    console.log('📧 Welcome Email Sent:');
-    console.log(`To: ${user.email}`);
-    console.log(`Subject: Bienvenido a Enigma Boxing Club`);
-    console.log(`Temporary Password: ${tempPassword}`);
-    console.log('---');
+  // Delete user
+  public async deleteUser(userId: string): Promise<void> {
+    try {
+      await apiService.users.delete(userId);
+
+      // If deleting current user, logout
+      if (this.currentUser && this.currentUser.id === userId) {
+        await this.logout();
+      }
+    } catch (error) {
+      console.error('Failed to delete user:', error);
+      throw error;
+    }
   }
 
-  sendPasswordResetEmail(user: User, tempPassword: string): void {
-    console.log('📧 Password Reset Email Sent:');
-    console.log(`To: ${user.email}`);
-    console.log(`Subject: Restablecimiento de Contraseña - Enigma Boxing Club`);
-    console.log(`Temporary Password: ${tempPassword}`);
-    console.log('---');
+  // Reset password (admin only)
+  public async resetPassword(email: string): Promise<{ user: User; tempPassword: string }> {
+    try {
+      // This would need to be implemented in the API
+      // For now, we'll throw an error
+      throw new Error('Password reset not implemented in API yet');
+    } catch (error) {
+      console.error('Password reset failed:', error);
+      throw error;
+    }
   }
 
-  // Helper methods for role checking
-  hasPermission(requiredRole: string, targetUserId?: string): boolean {
-    if (!this.currentUser) return false;
-
-    const user = this.currentUser;
-
-    // Admin can do everything
-    if (user.role === 'admin') return true;
-
-    // Trainer can manage students and their own profile
-    if (user.role === 'trainer') {
-      if (requiredRole === 'student') return true;
-      if (targetUserId && user.id.toString() === targetUserId) return true;
-    }
-
-    // Students can only manage their own profile
-    if (user.role === 'student') {
-      if (targetUserId && user.id.toString() === targetUserId) return true;
-    }
-
-    return false;
+  // Clear all data (development helper)
+  public clearAllData(): void {
+    localStorage.removeItem('auth-token');
+    this.currentUser = null;
+    this.saveCurrentUser();
+    console.log('All user data cleared!');
   }
 }
 
+// Export a singleton instance
 export const userService = new UserService();
+export default userService;
