@@ -1,12 +1,14 @@
+// src/contexts/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, AuthState, LoginCredentials, PasswordChangeData, UserProfileUpdateData } from '../types/UserTypes';
 import { userService } from '../services/UserService';
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<User>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateProfile: (data: UserProfileUpdateData) => Promise<User>;
   changePassword: (data: PasswordChangeData) => Promise<User>;
+  refreshUser: () => Promise<void>;
   isFirstLogin: boolean;
 }
 
@@ -33,139 +35,178 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   });
   const [isFirstLogin, setIsFirstLogin] = useState(false);
 
-  // Cargar usuario actual al iniciar
+  // Initialize authentication state
   useEffect(() => {
-    const currentUser = userService.getCurrentUser();
-    
-    if (currentUser) {
-      setAuthState({
-        user: currentUser,
-        isAuthenticated: true,
-        isLoading: false,
-        error: null
-      });
-      
-      // Verificar si es el primer inicio de sesión (tiene contraseña temporal)
-      setIsFirstLogin(!!currentUser.tempPassword);
-    } else {
-      setAuthState({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false,
-        error: null
-      });
-    }
+    const initializeAuth = async () => {
+      try {
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+          const currentUser = await userService.refreshCurrentUser();
+          if (currentUser) {
+            setAuthState({
+              user: currentUser,
+              isAuthenticated: true,
+              isLoading: false,
+              error: null
+            });
+
+            // Check if user has temporary password (first login)
+            setIsFirstLogin(!!currentUser.tempPassword);
+          } else {
+            // Token is invalid
+            setAuthState({
+              user: null,
+              isAuthenticated: false,
+              isLoading: false,
+              error: null
+            });
+          }
+        } else {
+          setAuthState({
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+            error: null
+          });
+        }
+      } catch (error) {
+        console.error('Authentication initialization failed:', error);
+        setAuthState({
+          user: null,
+          isAuthenticated: false,
+          isLoading: false,
+          error: error instanceof Error ? error.message : 'Authentication failed'
+        });
+      }
+    };
+
+    initializeAuth();
   }, []);
 
   const login = async (credentials: LoginCredentials): Promise<User> => {
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
+
     try {
-      const user = userService.login(credentials);
-      
+      const user = await userService.login(credentials);
+
       setAuthState({
         user,
         isAuthenticated: true,
         isLoading: false,
         error: null
       });
-      
-      // Verificar si es el primer inicio de sesión (tiene contraseña temporal)
+
+      // Check if user has temporary password (first login)
       setIsFirstLogin(!!user.tempPassword);
-      
+
       return user;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Login failed';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Error al iniciar sesión'
+        error: errorMessage
       }));
       throw error;
     }
   };
 
-  const logout = () => {
-    userService.logout();
-    setAuthState({
-      user: null,
-      isAuthenticated: false,
-      isLoading: false,
-      error: null
-    });
-    setIsFirstLogin(false);
-  };
-
-  const updateProfile = async (data: UserProfileUpdateData): Promise<User> => {
-    if (!authState.user) {
-      throw new Error('No hay usuario autenticado');
-    }
-    
-    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
+  const logout = async (): Promise<void> => {
     try {
-      const updatedUser = userService.updateUserProfile(authState.user.id, data);
-      
+      await userService.logout();
+    } finally {
       setAuthState({
-        user: updatedUser,
-        isAuthenticated: true,
+        user: null,
+        isAuthenticated: false,
         isLoading: false,
         error: null
       });
-      
+      setIsFirstLogin(false);
+    }
+  };
+
+  const updateProfile = async (data: UserProfileUpdateData): Promise<User> => {
+    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      const updatedUser = await userService.updateProfile(data);
+
+      setAuthState(prev => ({
+        ...prev,
+        user: updatedUser,
+        isLoading: false,
+        error: null
+      }));
+
       return updatedUser;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Profile update failed';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Error al actualizar perfil'
+        error: errorMessage
       }));
       throw error;
     }
   };
 
   const changePassword = async (data: PasswordChangeData): Promise<User> => {
-    if (!authState.user) {
-      throw new Error('No hay usuario autenticado');
-    }
-    
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
+
     try {
-      const updatedUser = userService.changePassword(authState.user.id, data);
-      
-      setAuthState({
+      const updatedUser = await userService.changePassword(data);
+
+      setAuthState(prev => ({
+        ...prev,
         user: updatedUser,
-        isAuthenticated: true,
         isLoading: false,
         error: null
-      });
-      
-      // Ya no es el primer inicio de sesión
+      }));
+
+      // Clear first login flag after password change
       setIsFirstLogin(false);
-      
+
       return updatedUser;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Password change failed';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Error al cambiar contraseña'
+        error: errorMessage
       }));
       throw error;
     }
   };
 
+  const refreshUser = async (): Promise<void> => {
+    try {
+      const currentUser = await userService.refreshCurrentUser();
+      if (currentUser) {
+        setAuthState(prev => ({
+          ...prev,
+          user: currentUser,
+          error: null
+        }));
+        setIsFirstLogin(!!currentUser.tempPassword);
+      }
+    } catch (error) {
+      console.error('Failed to refresh user:', error);
+    }
+  };
+
+  const contextValue: AuthContextType = {
+    ...authState,
+    login,
+    logout,
+    updateProfile,
+    changePassword,
+    refreshUser,
+    isFirstLogin,
+  };
+
   return (
-    <AuthContext.Provider
-      value={{
-        ...authState,
-        login,
-        logout,
-        updateProfile,
-        changePassword,
-        isFirstLogin
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+      <AuthContext.Provider value={contextValue}>
+        {children}
+      </AuthContext.Provider>
   );
 };
