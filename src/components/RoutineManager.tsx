@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useRoutines, type Routine, type Exercise } from '../hooks/useRoutines';
 import { useRoutineDatabase } from '../hooks/useRoutineDatabase';
-import { useAuth } from '../hooks/useAuth';
+import {useAuth} from "../contexts/AuthContext.tsx";
 
 interface RoutineManagerProps {
   isOpen: boolean;
