@@ -254,7 +254,6 @@ const RoutineBuilder: React.FC<RoutineBuilderProps> = ({
         // Add new exercise
         addExerciseToBlock(currentBlockIndex, {
           ...exercise,
-          id: `exercise_${Date.now()}`
         });
       }
     }
@@ -727,7 +726,7 @@ const RoutineBuilder: React.FC<RoutineBuilderProps> = ({
                                 <div
                                     key={exercise.id}
                                     className="p-4 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-gray-50 dark:hover:bg-dark-elevated cursor-pointer transition-colors"
-                                    onClick={() => handleExerciseModalSave({ ...exercise, id: `exercise_${Date.now()}` })}
+                                    onClick={() => handleExerciseModalSave({ ...exercise })}
                                 >
                                   <div className="flex items-center justify-between">
                                     <div>
