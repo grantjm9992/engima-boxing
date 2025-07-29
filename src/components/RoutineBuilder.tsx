@@ -1,5 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Plus, Trash2, Clock, Target, Tag } from 'lucide-react';
+import { X, Save, Plus, Trash2, Clock, Target, Tag, Edit3, Play, Copy, Loader2 } from 'lucide-react';
+import { apiService } from '../services/apiService';
+
+interface Exercise {
+  id: string;
+  name: string;
+  duration: number;
+  intensity: 'low' | 'medium' | 'high';
+  work_type: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  description?: string;
+  instructions?: string[];
+  tags?: string[];
+  materials?: string[];
+  protection?: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 interface RoutineBuilderProps {
   routine?: any;
@@ -13,7 +31,7 @@ interface RoutineBuilderProps {
 interface Block {
   id: string;
   name: string;
-  exercises: any[];
+  exercises: Exercise[];
   duration: number;
 }
 
@@ -41,6 +59,45 @@ const RoutineBuilder: React.FC<RoutineBuilderProps> = ({
   });
 
   const [activeTab, setActiveTab] = useState<'basic' | 'blocks' | 'details'>('basic');
+  const [showExerciseModal, setShowExerciseModal] = useState(false);
+  const [currentBlockIndex, setCurrentBlockIndex] = useState<number | null>(null);
+  const [editingExercise, setEditingExercise] = useState<Exercise | null>(null);
+
+  // API state for exercises
+  const [availableExercises, setAvailableExercises] = useState<Exercise[]>([]);
+  const [exercisesLoading, setExercisesLoading] = useState(false);
+  const [exercisesError, setExercisesError] = useState<string | null>(null);
+
+  // Load exercises from API when component mounts
+  useEffect(() => {
+    if (isOpen) {
+      loadExercises();
+    }
+  }, [isOpen]);
+
+  const loadExercises = async () => {
+    setExercisesLoading(true);
+    setExercisesError(null);
+
+    try {
+      const response = await apiService.exercises.getAll({
+        active: true,
+        per_page: 100 // Get more exercises for selection
+      });
+
+      if (response.exercises && Array.isArray(response.exercises)) {
+        setAvailableExercises(response.exercises);
+      } else {
+        throw new Error('Invalid exercises response format');
+      }
+    } catch (error) {
+      console.error('Error loading exercises:', error);
+      setExercisesError(error instanceof Error ? error.message : 'Error loading exercises');
+      setAvailableExercises([]);
+    } finally {
+      setExercisesLoading(false);
+    }
+  };
 
   // Initialize form data from routine prop
   useEffect(() => {
@@ -86,7 +143,14 @@ const RoutineBuilder: React.FC<RoutineBuilderProps> = ({
   };
 
   const calculateTotalDuration = () => {
-    return formData.blocks.reduce((total, block) => total + block.duration, 0);
+    return formData.blocks.reduce((total, block) => {
+      const blockDuration = block.exercises.reduce((blockTotal, exercise) => blockTotal + exercise.duration, 0);
+      return total + blockDuration;
+    }, 0);
+  };
+
+  const calculateBlockDuration = (block: Block) => {
+    return block.exercises.reduce((total, exercise) => total + exercise.duration, 0);
   };
 
   const handleSave = () => {
@@ -137,6 +201,66 @@ const RoutineBuilder: React.FC<RoutineBuilderProps> = ({
       ...prev,
       blocks: prev.blocks.filter((_, i) => i !== index)
     }));
+  };
+
+  const addExerciseToBlock = (blockIndex: number, exercise: Exercise) => {
+    const updatedBlocks = [...formData.blocks];
+    updatedBlocks[blockIndex].exercises.push({ ...exercise });
+
+    setFormData(prev => ({
+      ...prev,
+      blocks: updatedBlocks
+    }));
+  };
+
+  const updateExerciseInBlock = (blockIndex: number, exerciseIndex: number, updates: Partial<Exercise>) => {
+    const updatedBlocks = [...formData.blocks];
+    updatedBlocks[blockIndex].exercises[exerciseIndex] = {
+      ...updatedBlocks[blockIndex].exercises[exerciseIndex],
+      ...updates
+    };
+
+    setFormData(prev => ({
+      ...prev,
+      blocks: updatedBlocks
+    }));
+  };
+
+  const removeExerciseFromBlock = (blockIndex: number, exerciseIndex: number) => {
+    const updatedBlocks = [...formData.blocks];
+    updatedBlocks[blockIndex].exercises.splice(exerciseIndex, 1);
+
+    setFormData(prev => ({
+      ...prev,
+      blocks: updatedBlocks
+    }));
+  };
+
+  const openExerciseModal = (blockIndex: number, exercise?: Exercise) => {
+    setCurrentBlockIndex(blockIndex);
+    setEditingExercise(exercise || null);
+    setShowExerciseModal(true);
+  };
+
+  const handleExerciseModalSave = (exercise: Exercise) => {
+    if (currentBlockIndex !== null) {
+      if (editingExercise) {
+        // Update existing exercise
+        const exerciseIndex = formData.blocks[currentBlockIndex].exercises.findIndex(ex => ex.id === exercise.id);
+        if (exerciseIndex >= 0) {
+          updateExerciseInBlock(currentBlockIndex, exerciseIndex, exercise);
+        }
+      } else {
+        // Add new exercise
+        addExerciseToBlock(currentBlockIndex, {
+          ...exercise,
+          id: `exercise_${Date.now()}`
+        });
+      }
+    }
+    setShowExerciseModal(false);
+    setCurrentBlockIndex(null);
+    setEditingExercise(null);
   };
 
   const addTag = (tagName: string) => {
@@ -345,37 +469,118 @@ const RoutineBuilder: React.FC<RoutineBuilderProps> = ({
                         <p className="text-sm">Agrega bloques para estructurar tu rutina</p>
                       </div>
                   ) : (
-                      <div className="space-y-4">
-                        {formData.blocks.map((block, index) => (
+                      <div className="space-y-6">
+                        {formData.blocks.map((block, blockIndex) => (
                             <div key={block.id} className="p-4 border border-gray-200 dark:border-dark-border rounded-lg">
-                              <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center justify-between mb-4">
                                 <input
                                     type="text"
                                     value={block.name}
-                                    onChange={(e) => updateBlock(index, { name: e.target.value })}
-                                    className="font-medium text-gray-900 dark:text-white bg-transparent border-none focus:outline-none focus:ring-0 p-0"
+                                    onChange={(e) => updateBlock(blockIndex, { name: e.target.value })}
+                                    className="font-medium text-lg text-gray-900 dark:text-white bg-transparent border-none focus:outline-none focus:ring-0 p-0"
                                 />
-                                <button
-                                    onClick={() => removeBlock(index)}
-                                    className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                <div className="flex items-center space-x-2">
+                                  <button
+                                      onClick={() => openExerciseModal(blockIndex)}
+                                      className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors flex items-center space-x-1"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>Ejercicio</span>
+                                  </button>
+                                  <button
+                                      onClick={() => removeBlock(blockIndex)}
+                                      className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </div>
-                              <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
+
+                              {/* Block Info */}
+                              <div className="flex items-center space-x-4 mb-4 text-sm text-gray-600 dark:text-gray-400">
                                 <div className="flex items-center space-x-1">
                                   <Clock className="w-4 h-4" />
-                                  <input
-                                      type="number"
-                                      value={block.duration}
-                                      onChange={(e) => updateBlock(index, { duration: parseInt(e.target.value) || 0 })}
-                                      className="w-16 px-2 py-1 border border-gray-300 dark:border-dark-border rounded text-center dark:bg-dark-surface dark:text-white"
-                                      min="0"
-                                  />
-                                  <span>min</span>
+                                  <span>{calculateBlockDuration(block)} min</span>
                                 </div>
                                 <span>{block.exercises.length} ejercicio(s)</span>
                               </div>
+
+                              {/* Exercises */}
+                              {block.exercises.length === 0 ? (
+                                  <div className="text-center py-6 text-gray-400 border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-lg">
+                                    <p>No hay ejercicios en este bloque</p>
+                                    <button
+                                        onClick={() => openExerciseModal(blockIndex)}
+                                        className="mt-2 text-blue-600 hover:text-blue-700 text-sm"
+                                    >
+                                      Agregar primer ejercicio
+                                    </button>
+                                  </div>
+                              ) : (
+                                  <div className="space-y-2">
+                                    {block.exercises.map((exercise, exerciseIndex) => (
+                                        <div
+                                            key={exercise.id}
+                                            className="flex items-center justify-between p-3 bg-gray-50 dark:bg-dark-elevated rounded-lg"
+                                        >
+                                          <div className="flex-1">
+                                            <div className="flex items-center space-x-3">
+                                              <h4 className="font-medium text-gray-900 dark:text-white">
+                                                {exercise.name}
+                                              </h4>
+                                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                                  exercise.intensity === 'high'
+                                                      ? 'bg-red-100 text-red-800'
+                                                      : exercise.intensity === 'medium'
+                                                          ? 'bg-yellow-100 text-yellow-800'
+                                                          : 'bg-green-100 text-green-800'
+                                              }`}>
+                                    {exercise.intensity === 'high' ? 'Alta' : exercise.intensity === 'medium' ? 'Media' : 'Baja'}
+                                  </span>
+                                            </div>
+                                            <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600 dark:text-gray-400">
+                                  <span className="flex items-center space-x-1">
+                                    <Clock className="w-3 h-3" />
+                                    <span>{exercise.duration} min</span>
+                                  </span>
+                                              <span>{exercise.workType}</span>
+                                            </div>
+                                            {exercise.description && (
+                                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                                  {exercise.description}
+                                                </p>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center space-x-1 ml-4">
+                                            <button
+                                                onClick={() => openExerciseModal(blockIndex, exercise)}
+                                                className="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded"
+                                                title="Editar ejercicio"
+                                            >
+                                              <Edit3 className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                  const duplicated = { ...exercise, id: `exercise_${Date.now()}`, name: `${exercise.name} (Copia)` };
+                                                  addExerciseToBlock(blockIndex, duplicated);
+                                                }}
+                                                className="p-1 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded"
+                                                title="Duplicar ejercicio"
+                                            >
+                                              <Copy className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => removeExerciseFromBlock(blockIndex, exerciseIndex)}
+                                                className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                                                title="Eliminar ejercicio"
+                                            >
+                                              <Trash2 className="w-4 h-4" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                    ))}
+                                  </div>
+                              )}
                             </div>
                         ))}
                       </div>
@@ -476,6 +681,227 @@ const RoutineBuilder: React.FC<RoutineBuilderProps> = ({
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Exercise Modal */}
+        {showExerciseModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-dark-surface rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+                <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      {editingExercise ? 'Editar Ejercicio' : 'Agregar Ejercicio'}
+                    </h3>
+                    <button
+                        onClick={() => {
+                          setShowExerciseModal(false);
+                          setEditingExercise(null);
+                          setCurrentBlockIndex(null);
+                        }}
+                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-dark-elevated rounded-lg"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-6 overflow-y-auto max-h-[calc(80vh-120px)]">
+                  {editingExercise ? (
+                      <ExerciseForm
+                          exercise={editingExercise}
+                          onSave={handleExerciseModalSave}
+                          onCancel={() => {
+                            setShowExerciseModal(false);
+                            setEditingExercise(null);
+                            setCurrentBlockIndex(null);
+                          }}
+                      />
+                  ) : (
+                      <div className="space-y-6">
+                        <div>
+                          <h4 className="font-medium text-gray-900 dark:text-white mb-4">
+                            Seleccionar Ejercicio Existente
+                          </h4>
+                          <div className="grid gap-3">
+                            {availableExercises.map((exercise) => (
+                                <div
+                                    key={exercise.id}
+                                    className="p-4 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-gray-50 dark:hover:bg-dark-elevated cursor-pointer transition-colors"
+                                    onClick={() => handleExerciseModalSave({ ...exercise, id: `exercise_${Date.now()}` })}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <h5 className="font-medium text-gray-900 dark:text-white">
+                                        {exercise.name}
+                                      </h5>
+                                      <div className="flex items-center space-x-3 mt-1 text-sm text-gray-600 dark:text-gray-400">
+                                <span className="flex items-center space-x-1">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{exercise.duration} min</span>
+                                </span>
+                                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                            exercise.intensity === 'high'
+                                                ? 'bg-red-100 text-red-800'
+                                                : exercise.intensity === 'medium'
+                                                    ? 'bg-yellow-100 text-yellow-800'
+                                                    : 'bg-green-100 text-green-800'
+                                        }`}>
+                                  {exercise.intensity === 'high' ? 'Alta' : exercise.intensity === 'medium' ? 'Media' : 'Baja'}
+                                </span>
+                                        <span>{exercise.workType}</span>
+                                      </div>
+                                      {exercise.description && (
+                                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                            {exercise.description}
+                                          </p>
+                                      )}
+                                    </div>
+                                    <Plus className="w-5 h-5 text-blue-600" />
+                                  </div>
+                                </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="pt-6 border-t border-gray-200 dark:border-dark-border">
+                          <button
+                              onClick={() => {
+                                const newExercise: Exercise = {
+                                  id: `exercise_${Date.now()}`,
+                                  name: '',
+                                  duration: 3,
+                                  intensity: 'medium',
+                                  workType: 'technique',
+                                  description: '',
+                                  instructions: []
+                                };
+                                setEditingExercise(newExercise);
+                              }}
+                              className="w-full p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-blue-400 dark:hover:border-blue-500 transition-colors flex items-center justify-center space-x-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400"
+                          >
+                            <Plus className="w-5 h-5" />
+                            <span>Crear Nuevo Ejercicio</span>
+                          </button>
+                        </div>
+                      </div>
+                  )}
+                </div>
+              </div>
+            </div>
+        )}
+      </div>
+  );
+};
+
+// Exercise Form Component
+interface ExerciseFormProps {
+  exercise: Exercise;
+  onSave: (exercise: Exercise) => void;
+  onCancel: () => void;
+}
+
+const ExerciseForm: React.FC<ExerciseFormProps> = ({ exercise, onSave, onCancel }) => {
+  const [formData, setFormData] = useState<Exercise>(exercise);
+
+  const handleSave = () => {
+    if (!formData.name.trim()) {
+      alert('El nombre del ejercicio es obligatorio');
+      return;
+    }
+    onSave(formData);
+  };
+
+  return (
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Nombre del Ejercicio *
+          </label>
+          <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+              placeholder="Ej: Jab básico"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Descripción
+          </label>
+          <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              rows={2}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+              placeholder="Descripción del ejercicio..."
+          />
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Duración (min)
+            </label>
+            <input
+                type="number"
+                value={formData.duration}
+                onChange={(e) => setFormData({ ...formData, duration: parseInt(e.target.value) || 0 })}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+                min="1"
+                max="60"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Intensidad
+            </label>
+            <select
+                value={formData.intensity}
+                onChange={(e) => setFormData({ ...formData, intensity: e.target.value as 'low' | 'medium' | 'high' })}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+            >
+              <option value="low">Baja</option>
+              <option value="medium">Media</option>
+              <option value="high">Alta</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Tipo
+            </label>
+            <select
+                value={formData.workType}
+                onChange={(e) => setFormData({ ...formData, workType: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+            >
+              <option value="technique">Técnica</option>
+              <option value="cardio">Cardio</option>
+              <option value="strength">Fuerza</option>
+              <option value="coordination">Coordinación</option>
+              <option value="flexibility">Flexibilidad</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex space-x-3 pt-4">
+          <button
+              onClick={handleSave}
+              disabled={!formData.name.trim()}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          >
+            <Save className="w-4 h-4" />
+            <span>Guardar Ejercicio</span>
+          </button>
+          <button
+              onClick={onCancel}
+              className="px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-dark-border rounded-lg hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors"
+          >
+            Cancelar
+          </button>
         </div>
       </div>
   );
