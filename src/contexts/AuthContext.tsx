@@ -4,10 +4,11 @@ import { userService } from '../services/UserService';
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<User>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateProfile: (data: UserProfileUpdateData) => Promise<User>;
   changePassword: (data: PasswordChangeData) => Promise<User>;
   isFirstLogin: boolean;
+  clearError: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,59 +34,86 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   });
   const [isFirstLogin, setIsFirstLogin] = useState(false);
 
-  // Cargar usuario actual al iniciar
+  // Initialize user session on app start
   useEffect(() => {
-    const currentUser = userService.getCurrentUser();
-    
-    if (currentUser) {
-      setAuthState({
-        user: currentUser,
-        isAuthenticated: true,
-        isLoading: false,
-        error: null
-      });
-      
-      // Verificar si es el primer inicio de sesión (tiene contraseña temporal)
-      setIsFirstLogin(!!currentUser.tempPassword);
-    } else {
+    initializeSession();
+  }, []);
+
+  const initializeSession = async () => {
+    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      const user = await userService.initializeSession();
+
+      if (user) {
+        setAuthState({
+          user,
+          isAuthenticated: true,
+          isLoading: false,
+          error: null
+        });
+
+        // Check if user has temp password (first login)
+        setIsFirstLogin(!!user.tempPassword);
+      } else {
+        setAuthState({
+          user: null,
+          isAuthenticated: false,
+          isLoading: false,
+          error: null
+        });
+        setIsFirstLogin(false);
+      }
+    } catch (error) {
+      console.error('Session initialization failed:', error);
       setAuthState({
         user: null,
         isAuthenticated: false,
         isLoading: false,
-        error: null
+        error: null // Don't show error for failed session init
       });
+      setIsFirstLogin(false);
     }
-  }, []);
+  };
 
   const login = async (credentials: LoginCredentials): Promise<User> => {
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
+
     try {
-      const user = userService.login(credentials);
-      
+      const user = await userService.login(credentials);
+
       setAuthState({
         user,
         isAuthenticated: true,
         isLoading: false,
         error: null
       });
-      
-      // Verificar si es el primer inicio de sesión (tiene contraseña temporal)
+
+      // Check if this is first login (user has temp password)
       setIsFirstLogin(!!user.tempPassword);
-      
+
       return user;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error al iniciar sesión';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Error al iniciar sesión'
+        error: errorMessage
       }));
       throw error;
     }
   };
 
-  const logout = () => {
-    userService.logout();
+  const logout = async (): Promise<void> => {
+    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      await userService.logout();
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Continue with logout even if API call fails
+    }
+
     setAuthState({
       user: null,
       isAuthenticated: false,
@@ -99,25 +127,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!authState.user) {
       throw new Error('No hay usuario autenticado');
     }
-    
+
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
+
     try {
-      const updatedUser = userService.updateUserProfile(authState.user.id, data);
-      
+      const updatedUser = await userService.updateUserProfile(authState.user.id, data);
+
       setAuthState({
         user: updatedUser,
         isAuthenticated: true,
         isLoading: false,
         error: null
       });
-      
+
       return updatedUser;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error al actualizar perfil';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Error al actualizar perfil'
+        error: errorMessage
       }));
       throw error;
     }
@@ -127,45 +156,51 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!authState.user) {
       throw new Error('No hay usuario autenticado');
     }
-    
+
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
+
     try {
-      const updatedUser = userService.changePassword(authState.user.id, data);
-      
+      const updatedUser = await userService.changePassword(authState.user.id, data);
+
       setAuthState({
         user: updatedUser,
         isAuthenticated: true,
         isLoading: false,
         error: null
       });
-      
-      // Ya no es el primer inicio de sesión
+
+      // Password changed successfully, no longer first login
       setIsFirstLogin(false);
-      
+
       return updatedUser;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error al cambiar contraseña';
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Error al cambiar contraseña'
+        error: errorMessage
       }));
       throw error;
     }
   };
 
+  const clearError = () => {
+    setAuthState(prev => ({ ...prev, error: null }));
+  };
+
   return (
-    <AuthContext.Provider
-      value={{
-        ...authState,
-        login,
-        logout,
-        updateProfile,
-        changePassword,
-        isFirstLogin
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+      <AuthContext.Provider
+          value={{
+            ...authState,
+            login,
+            logout,
+            updateProfile,
+            changePassword,
+            isFirstLogin,
+            clearError
+          }}
+      >
+        {children}
+      </AuthContext.Provider>
   );
 };

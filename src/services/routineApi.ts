@@ -1,5 +1,5 @@
 // src/services/routineApi.ts
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:80';
 
 export interface CreateRoutineRequest {
     name: string;
@@ -60,6 +60,7 @@ class RoutineApiService {
                 ...(token && { Authorization: `Bearer ${token}` }),
                 ...options.headers,
             },
+            method: 'GET',
             ...options,
         });
 
