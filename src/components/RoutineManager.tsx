@@ -6,13 +6,13 @@ import {
 } from 'lucide-react';
 import { useRoutines, type Routine, type Exercise } from '../hooks/useRoutines';
 import { useRoutineDatabase } from '../hooks/useRoutineDatabase';
-import {useAuth} from "../contexts/AuthContext.tsx";
+import { useAuth } from '../contexts/AuthContext';
+import RoutineBuilder from './RoutineBuilder';
 
 interface RoutineManagerProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectRoutine?: (routine: Routine) => void;
-  onEditRoutine?: (routine: Routine) => void;
   selectionMode?: boolean;
 }
 
@@ -20,7 +20,6 @@ const RoutineManager: React.FC<RoutineManagerProps> = ({
                                                          isOpen,
                                                          onClose,
                                                          onSelectRoutine,
-                                                         onEditRoutine,
                                                          selectionMode = false
                                                        }) => {
   const { user } = useAuth();
@@ -59,6 +58,10 @@ const RoutineManager: React.FC<RoutineManagerProps> = ({
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [routineToDelete, setRoutineToDelete] = useState<string | null>(null);
 
+  // Routine Builder state
+  const [showRoutineBuilder, setShowRoutineBuilder] = useState(false);
+  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
+
   // Load routines when component opens
   useEffect(() => {
     if (isOpen) {
@@ -96,16 +99,38 @@ const RoutineManager: React.FC<RoutineManagerProps> = ({
   }, [searchTerm, filterCategory, filterDifficulty, filterLevel, sortBy, showFavoritesOnly, showTemplatesOnly]);
 
   const handleCreateRoutine = () => {
-    // This would open a create routine modal/form
-    if (onEditRoutine) {
-      onEditRoutine(null as any); // Signal to create new routine
-    }
+    setEditingRoutine(null);
+    setShowRoutineBuilder(true);
   };
 
   const handleEditRoutine = (routine: Routine) => {
-    if (onEditRoutine) {
-      onEditRoutine(routine);
+    setEditingRoutine(routine);
+    setShowRoutineBuilder(true);
+  };
+
+  const handleSaveRoutine = async (routineData: any) => {
+    try {
+      if (editingRoutine) {
+        // Update existing routine
+        await updateRoutine(editingRoutine.id, routineData);
+      } else {
+        // Create new routine
+        await createRoutine(routineData);
+      }
+
+      setShowRoutineBuilder(false);
+      setEditingRoutine(null);
+
+      // Reload routines to show changes
+      await loadRoutinesData();
+    } catch (error) {
+      console.error('Failed to save routine:', error);
     }
+  };
+
+  const handleCancelRoutineBuilder = () => {
+    setShowRoutineBuilder(false);
+    setEditingRoutine(null);
   };
 
   const handleDeleteRoutine = async (routineId: string) => {
@@ -543,6 +568,21 @@ const RoutineManager: React.FC<RoutineManagerProps> = ({
               </div>
           )}
         </div>
+
+        {/* Routine Builder Modal */}
+        {showRoutineBuilder && (
+            <RoutineBuilder
+                routine={editingRoutine || undefined}
+                availableTags={tags}
+                onSave={handleSaveRoutine}
+                onCancel={handleCancelRoutineBuilder}
+                isOpen={showRoutineBuilder}
+                onOpenTagManager={() => {
+                  // Handle tag manager if needed
+                  console.log('Open tag manager');
+                }}
+            />
+        )}
       </div>
   );
 };

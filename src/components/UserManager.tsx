@@ -1,12 +1,12 @@
-// src/components/UserManager.tsx
 import React, { useState, useEffect } from 'react';
 import {
-  Users, Plus, Search, Trash2,
-  RotateCcw, Power, PowerOff,
-  AlertCircle, Check, X, Save, Loader
+  Users, Plus, Search, Filter, Edit3, Trash2,
+  Mail, X, Save, Shield, Key, CheckCircle,
+  AlertCircle, User, UserPlus, UserMinus, MoreHorizontal,
+  Eye, EyeOff, RefreshCw, Info, Loader2
 } from 'lucide-react';
-import { User, UserRole, SubscriptionPlan, UserRegistrationData } from '../types/UserTypes';
-import { userService } from '../services/UserService';
+import { UserRegistrationData, UserRole, SubscriptionPlan } from '../types/UserTypes';
+import { apiService } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
 interface UserManagerProps {
@@ -14,571 +14,627 @@ interface UserManagerProps {
   onClose: () => void;
 }
 
+interface ApiUser {
+  id: string;
+  email: string;
+  role: UserRole;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
+  phone?: string;
+  subscription_plan: SubscriptionPlan;
+  is_active: boolean;
+  is_email_verified: boolean;
+  last_login?: string;
+  temp_password?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Pagination {
+  current_page: number;
+  last_page: number;
+  per_page: number;
+  total: number;
+}
+
 const UserManager: React.FC<UserManagerProps> = ({ isOpen, onClose }) => {
   const { user: currentUser } = useAuth();
-  const [users, setUsers] = useState<User[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [pagination, setPagination] = useState<Pagination | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [activeFilter, setActiveFilter] = useState<boolean | null>(null);
-  const [sortBy, setSortBy] = useState<'name' | 'email' | 'role' | 'created_at'>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-
-  // Pagination
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalUsers, setTotalUsers] = useState(0);
-  const perPage = 10;
-
-  // Form states
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [filterRole, setFilterRole] = useState<string>('all');
+  const [filterActive, setFilterActive] = useState<string>('all');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<string | null>(null);
   const [showEmailSent, setShowEmailSent] = useState(false);
   const [lastEmailSentTo, setLastEmailSentTo] = useState('');
-  const [createFormData, setCreateFormData] = useState<UserRegistrationData>({
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const [newUserForm, setNewUserForm] = useState<UserRegistrationData>({
     email: '',
     role: 'student',
     subscriptionPlan: 'basic',
-  });
-  const [createFormExtended, setCreateFormExtended] = useState({
     firstName: '',
     lastName: '',
-    phone: '',
+    phone: ''
   });
-  const [creatingUser, setCreatingUser] = useState(false);
 
-  // Load users
-  const loadUsers = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await userService.getAllUsers({
-        role: roleFilter !== 'all' ? roleFilter : undefined,
-        active: activeFilter ?? undefined,
-        search: searchTerm || undefined,
-        sortBy,
-        sortDirection,
-        page: currentPage,
-        perPage,
-      });
-
-      setUsers(response.users);
-      setFilteredUsers(response.users);
-      setTotalPages(response.pagination.last_page);
-      setTotalUsers(response.pagination.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar usuarios');
-      setUsers([]);
-      setFilteredUsers([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Load users on component mount and when filters change
+  // Load users when component opens or filters change
   useEffect(() => {
     if (isOpen) {
       loadUsers();
     }
-  }, [isOpen, searchTerm, roleFilter, activeFilter, sortBy, sortDirection, currentPage]);
+  }, [isOpen, searchTerm, filterRole, filterActive, currentPage]);
 
-  // Create user
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!createFormData.email) {
-      setError('El email es requerido');
+  const loadUsers = async () => {
+    if (!currentUser || (!currentUser.role.includes('admin') && !currentUser.role.includes('trainer'))) {
+      setError('Insufficient permissions to view users');
       return;
     }
 
-    try {
-      setCreatingUser(true);
-      setError(null);
+    setIsLoading(true);
+    setError(null);
 
-      const userData: UserRegistrationData & { firstName?: string; lastName?: string; phone?: string } = {
-        ...createFormData,
-        firstName: createFormExtended.firstName || undefined,
-        lastName: createFormExtended.lastName || undefined,
-        phone: createFormExtended.phone || undefined,
+    try {
+      const params: any = {
+        page: currentPage,
+        per_page: 15
       };
 
-      const result = await userService.createUser(userData);
+      if (searchTerm.trim()) {
+        params.search = searchTerm.trim();
+      }
 
-      // Send welcome email (simulated)
-      userService.sendWelcomeEmail(result.user, result.tempPassword);
+      if (filterRole !== 'all') {
+        params.role = filterRole;
+      }
 
-      // Show success message
-      setLastEmailSentTo(result.user.email);
-      setShowEmailSent(true);
+      if (filterActive !== 'all') {
+        params.active = filterActive === 'active';
+      }
 
-      // Reset form
-      setCreateFormData({ email: '', role: 'student', subscriptionPlan: 'basic' });
-      setCreateFormExtended({ firstName: '', lastName: '', phone: '' });
-      setShowCreateForm(false);
+      const response = await apiService.users.getAll(params);
 
-      // Reload users
-      await loadUsers();
+      if (response.users && Array.isArray(response.users)) {
+        setUsers(response.users);
+        setPagination(response.pagination || null);
+      } else {
+        throw new Error('Invalid response format');
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al crear usuario');
+      console.error('Error loading users:', err);
+      setError(err instanceof Error ? err.message : 'Error al cargar usuarios');
+      setUsers([]);
+      setPagination(null);
     } finally {
-      setCreatingUser(false);
+      setIsLoading(false);
     }
   };
 
-  // Delete user
-  const handleDeleteUser = async (userId: string) => {
-    if (!confirm('¿Estás seguro de que quieres eliminar este usuario?')) {
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCurrentPage(1); // Reset to first page when searching
+      if (isOpen) {
+        loadUsers();
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const handleCreateUser = async () => {
+    if (!newUserForm.email.trim()) {
+      setError('Email is required');
       return;
     }
 
+    setIsLoading(true);
+    setError(null);
+
     try {
-      setError(null);
-      await userService.deleteUser(userId);
-      await loadUsers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al eliminar usuario');
-    }
-  };
+      const response = await apiService.users.create({
+        email: newUserForm.email.trim(),
+        role: newUserForm.role,
+        subscription_plan: newUserForm.subscriptionPlan,
+        first_name: newUserForm.firstName?.trim(),
+        last_name: newUserForm.lastName?.trim(),
+        phone: newUserForm.phone?.trim()
+      });
 
-  // Reset password
-  const handleResetPassword = async (email: string) => {
-    try {
-      setError(null);
-      const result = await userService.resetPassword(email);
-
-      // Send reset email (simulated)
-      userService.sendPasswordResetEmail(result.user, result.tempPassword);
-
-      // Show success message
-      setLastEmailSentTo(email);
+      setLastEmailSentTo(newUserForm.email);
       setShowEmailSent(true);
+      setIsCreatingUser(false);
+      setNewUserForm({
+        email: '',
+        role: 'student',
+        subscriptionPlan: 'basic',
+        firstName: '',
+        lastName: '',
+        phone: ''
+      });
 
+      // Reload users to show the new one
       await loadUsers();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al restablecer contraseña');
+      console.error('Error creating user:', err);
+      setError(err instanceof Error ? err.message : 'Error al crear usuario');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Toggle user active status
-  const handleToggleActive = async (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
+    setIsLoading(true);
+    setError(null);
+
     try {
-      setError(null);
-      await userService.toggleUserActive(userId);
+      await apiService.users.delete(userId);
+      setShowConfirmDelete(false);
+      setUserToDelete(null);
       await loadUsers();
     } catch (err) {
+      console.error('Error deleting user:', err);
+      setError(err instanceof Error ? err.message : 'Error al eliminar usuario');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleToggleActive = async (userId: string) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      await apiService.users.toggleActive(userId);
+      await loadUsers();
+    } catch (err) {
+      console.error('Error toggling user status:', err);
       setError(err instanceof Error ? err.message : 'Error al cambiar estado del usuario');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Role and plan labels
-  const getRoleLabel = (role: UserRole): string => {
-    switch (role) {
-      case 'admin': return 'Administrador';
-      case 'trainer': return 'Entrenador';
-      case 'student': return 'Alumno';
-      default: return role;
-    }
+  const formatRole = (role: string) => {
+    const roleMap: Record<string, string> = {
+      admin: 'Administrador',
+      trainer: 'Entrenador',
+      student: 'Estudiante'
+    };
+    return roleMap[role] || role;
   };
 
-  const getRoleColor = (role: UserRole): string => {
-    switch (role) {
-      case 'admin': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-      case 'trainer': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
-      case 'student': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
-      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400';
-    }
-  };
-
-  const getPlanLabel = (plan?: SubscriptionPlan): string => {
-    if (!plan) return 'Sin plan';
-
-    switch (plan) {
-      case 'basic': return 'Básico';
-      case 'premium': return 'Premium';
-      case 'elite': return 'Élite';
-      case 'trial': return 'Prueba';
-      default: return plan;
-    }
+  const formatSubscription = (plan: string) => {
+    const planMap: Record<string, string> = {
+      basic: 'Básico',
+      premium: 'Premium',
+      elite: 'Elite',
+      trial: 'Prueba'
+    };
+    return planMap[plan] || plan;
   };
 
   if (!isOpen) return null;
 
   return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white dark:bg-dark-surface rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-dark-border">
-            <div className="flex items-center space-x-3">
-              <Users className="w-6 h-6 text-red-600" />
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                Gestión de Usuarios
-              </h2>
-              {totalUsers > 0 && (
-                  <span className="px-2 py-1 bg-gray-100 dark:bg-dark-elevated text-sm text-gray-600 dark:text-gray-400 rounded">
-                {totalUsers} usuarios
-              </span>
-              )}
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-dark-surface rounded-xl shadow-xl max-w-6xl w-full max-h-[95vh] overflow-hidden flex flex-col">
+          {/* Header */}
+          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
+                  <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Gestión de Usuarios</h2>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Administra usuarios del sistema
+                    {pagination && ` (${pagination.total} usuarios)`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                    onClick={() => setIsCreatingUser(true)}
+                    disabled={isLoading}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center space-x-2"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Nuevo Usuario</span>
+                </button>
+                <button
+                    onClick={onClose}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-dark-elevated rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-            <button
-                onClick={onClose}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-dark-elevated rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
           </div>
 
-          <div className="p-6">
-            {/* Error Display */}
-            {error && (
-                <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg flex items-start space-x-3">
-                  <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="text-sm font-medium text-red-800 dark:text-red-300">Error</h4>
-                    <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
-                  </div>
-                  <button
-                      onClick={() => setError(null)}
-                      className="ml-auto text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+          {/* Error Display */}
+          {error && (
+              <div className="mx-6 mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <AlertCircle className="w-5 h-5" />
+                  <span>{error}</span>
                 </div>
-            )}
+                <button
+                    onClick={() => setError(null)}
+                    className="text-red-700 hover:text-red-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+          )}
 
-            {/* Success Message */}
-            {showEmailSent && (
-                <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg flex items-start space-x-3">
-                  <Check className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="text-sm font-medium text-green-800 dark:text-green-300">Email Enviado</h4>
-                    <p className="text-sm text-green-700 dark:text-green-400">
-                      Se ha enviado un email con las credenciales a {lastEmailSentTo}
-                    </p>
-                  </div>
-                  <button
-                      onClick={() => setShowEmailSent(false)}
-                      className="ml-auto text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-            )}
-
-            {/* Controls */}
-            <div className="flex flex-col sm:flex-row gap-4 mb-6">
+          {/* Filters */}
+          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 lg:space-x-4">
               {/* Search */}
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                     type="text"
-                    placeholder="Buscar por nombre o email..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
+                    className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+                    placeholder="Buscar por nombre o email..."
+                    disabled={isLoading}
                 />
               </div>
 
               {/* Filters */}
-              <div className="flex gap-2">
+              <div className="flex items-center space-x-3">
                 <select
-                    value={roleFilter}
-                    onChange={(e) => setRoleFilter(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
+                    value={filterRole}
+                    onChange={(e) => setFilterRole(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white text-sm"
+                    disabled={isLoading}
                 >
                   <option value="all">Todos los roles</option>
-                  <option value="admin">Administradores</option>
-                  <option value="trainer">Entrenadores</option>
-                  <option value="student">Alumnos</option>
+                  <option value="admin">Administrador</option>
+                  <option value="trainer">Entrenador</option>
+                  <option value="student">Estudiante</option>
                 </select>
 
                 <select
-                    value={activeFilter === null ? 'all' : activeFilter.toString()}
-                    onChange={(e) => setActiveFilter(e.target.value === 'all' ? null : e.target.value === 'true')}
-                    className="px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
+                    value={filterActive}
+                    onChange={(e) => setFilterActive(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white text-sm"
+                    disabled={isLoading}
                 >
-                  <option value="all">Todos</option>
-                  <option value="true">Activos</option>
-                  <option value="false">Inactivos</option>
+                  <option value="all">Todos los estados</option>
+                  <option value="active">Activos</option>
+                  <option value="inactive">Inactivos</option>
                 </select>
+
+                <button
+                    onClick={loadUsers}
+                    disabled={isLoading}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-dark-elevated rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                </button>
               </div>
-
-              {/* Create Button */}
-              {currentUser?.role === 'admin' && (
-                  <button
-                      onClick={() => setShowCreateForm(true)}
-                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Crear Usuario</span>
-                  </button>
-              )}
             </div>
+          </div>
 
-            {/* Users List */}
-            {loading ? (
-                <div className="flex justify-center items-center py-12">
-                  <Loader className="w-8 h-8 animate-spin text-red-600" />
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto">
+            {isLoading && users.length === 0 ? (
+                <div className="text-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-500" />
+                  <p className="text-gray-500 dark:text-gray-400">Cargando usuarios...</p>
+                </div>
+            ) : users.length === 0 ? (
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                  <Users className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+                  <h3 className="text-lg font-semibold mb-2">No se encontraron usuarios</h3>
+                  <p>
+                    {searchTerm
+                        ? `No hay usuarios que coincidan con "${searchTerm}"`
+                        : 'No hay usuarios registrados en el sistema'
+                    }
+                  </p>
                 </div>
             ) : (
-                <>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                      <tr className="border-b border-gray-200 dark:border-dark-border">
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 dark:text-gray-300">Usuario</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 dark:text-gray-300">Rol</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 dark:text-gray-300">Plan</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 dark:text-gray-300">Estado</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 dark:text-gray-300">Último Login</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 dark:text-gray-300">Acciones</th>
-                      </tr>
-                      </thead>
-                      <tbody>
-                      {filteredUsers.map((user) => (
-                          <tr key={user.id} className="border-b border-gray-100 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-elevated">
-                            <td className="py-3 px-4">
-                              <div>
-                                <div className="font-medium text-gray-900 dark:text-white">
-                                  {user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : 'Sin nombre'}
-                                </div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">{user.email}</div>
-                                {user.phone && (
-                                    <div className="text-sm text-gray-400 dark:text-gray-500">{user.phone}</div>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-3 px-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRoleColor(user.role)}`}>
-                            {getRoleLabel(user.role)}
-                          </span>
-                            </td>
-                            <td className="py-3 px-4">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            {getPlanLabel(user.subscriptionPlan)}
-                          </span>
-                            </td>
-                            <td className="py-3 px-4">
+                <div className="divide-y divide-gray-200 dark:divide-dark-border">
+                  {users.map((user) => (
+                      <div key={user.id} className="p-6 hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-4">
+                            <div className="w-12 h-12 bg-gray-200 dark:bg-dark-border rounded-full flex items-center justify-center">
+                              <User className="w-6 h-6 text-gray-500 dark:text-gray-400" />
+                            </div>
+                            <div>
                               <div className="flex items-center space-x-2">
-                                {user.isActive ? (
-                                    <div className="flex items-center space-x-1 text-green-600 dark:text-green-400">
-                                      <Power className="w-4 h-4" />
-                                      <span className="text-sm">Activo</span>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center space-x-1 text-red-600 dark:text-red-400">
-                                      <PowerOff className="w-4 h-4" />
-                                      <span className="text-sm">Inactivo</span>
-                                    </div>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-3 px-4">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString('es-ES') : 'Nunca'}
+                                <h3 className="font-semibold text-gray-900 dark:text-white">
+                                  {user.full_name || user.email}
+                                </h3>
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                    user.is_active
+                                        ? 'bg-green-100 text-green-800'
+                                        : 'bg-red-100 text-red-800'
+                                }`}>
+                            {user.is_active ? 'Activo' : 'Inactivo'}
                           </span>
-                            </td>
-                            <td className="py-3 px-4">
-                              <div className="flex items-center space-x-2">
+                              </div>
+                              <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400 mt-1">
+                          <span className="flex items-center space-x-1">
+                            <Mail className="w-4 h-4" />
+                            <span>{user.email}</span>
+                          </span>
+                                <span className="flex items-center space-x-1">
+                            <Shield className="w-4 h-4" />
+                            <span>{formatRole(user.role)}</span>
+                          </span>
+                                <span>{formatSubscription(user.subscription_plan)}</span>
+                              </div>
+                              {user.last_login && (
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    Último acceso: {new Date(user.last_login).toLocaleDateString()}
+                                  </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-2">
+                            <button
+                                onClick={() => handleToggleActive(user.id)}
+                                disabled={isLoading}
+                                className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
+                                    user.is_active
+                                        ? 'text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30'
+                                        : 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30'
+                                }`}
+                            >
+                              {user.is_active ? <UserMinus className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                            </button>
+
+                            {currentUser?.role === 'admin' && (
                                 <button
-                                    onClick={() => handleResetPassword(user.email)}
-                                    className="p-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
-                                    title="Restablecer contraseña"
+                                    onClick={() => {
+                                      setUserToDelete(user.id);
+                                      setShowConfirmDelete(true);
+                                    }}
+                                    disabled={isLoading}
+                                    className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors disabled:opacity-50"
                                 >
-                                  <RotateCcw className="w-4 h-4" />
+                                  <Trash2 className="w-4 h-4" />
                                 </button>
-
-                                {currentUser?.id !== user.id && (
-                                    <button
-                                        onClick={() => handleToggleActive(user.id.toString())}
-                                        className={`p-1 rounded transition-colors ${
-                                            user.isActive
-                                                ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30'
-                                                : 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30'
-                                        }`}
-                                        title={user.isActive ? 'Desactivar usuario' : 'Activar usuario'}
-                                    >
-                                      {user.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
-                                    </button>
-                                )}
-
-                                {currentUser?.role === 'admin' && currentUser?.id !== user.id && (
-                                    <button
-                                        onClick={() => handleDeleteUser(user.id.toString())}
-                                        className="p-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
-                                        title="Eliminar usuario"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                      ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Pagination */}
-                  {totalPages > 1 && (
-                      <div className="flex justify-between items-center mt-6">
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          Página {currentPage} de {totalPages} ({totalUsers} usuarios)
-                        </div>
-                        <div className="flex space-x-2">
-                          <button
-                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                              disabled={currentPage === 1}
-                              className="px-3 py-1 border border-gray-300 dark:border-dark-border rounded hover:bg-gray-50 dark:hover:bg-dark-elevated disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            Anterior
-                          </button>
-                          <button
-                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                              disabled={currentPage === totalPages}
-                              className="px-3 py-1 border border-gray-300 dark:border-dark-border rounded hover:bg-gray-50 dark:hover:bg-dark-elevated disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            Siguiente
-                          </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                  )}
-                </>
+                  ))}
+                </div>
             )}
           </div>
 
-          {/* Create User Form Modal */}
-          {showCreateForm && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                <div className="bg-white dark:bg-dark-surface rounded-lg shadow-xl w-full max-w-md">
-                  <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-dark-border">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Crear Nuevo Usuario</h3>
+          {/* Pagination */}
+          {pagination && pagination.last_page > 1 && (
+              <div className="p-6 border-t border-gray-200 dark:border-dark-border">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    Mostrando {((pagination.current_page - 1) * pagination.per_page) + 1} a {Math.min(pagination.current_page * pagination.per_page, pagination.total)} de {pagination.total} usuarios
+                  </div>
+                  <div className="flex items-center space-x-2">
                     <button
-                        onClick={() => setShowCreateForm(false)}
-                        className="p-2 hover:bg-gray-100 dark:hover:bg-dark-elevated rounded-lg transition-colors"
+                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                        disabled={currentPage === 1 || isLoading}
+                        className="px-3 py-1 border border-gray-300 dark:border-dark-border rounded text-sm hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <X className="w-5 h-5" />
+                      Anterior
+                    </button>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Página {pagination.current_page} de {pagination.last_page}
+                </span>
+                    <button
+                        onClick={() => setCurrentPage(Math.min(pagination.last_page, currentPage + 1))}
+                        disabled={currentPage === pagination.last_page || isLoading}
+                        className="px-3 py-1 border border-gray-300 dark:border-dark-border rounded text-sm hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Siguiente
                     </button>
                   </div>
-
-                  <form onSubmit={handleCreateUser} className="p-6 space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Email *
-                      </label>
-                      <input
-                          type="email"
-                          value={createFormData.email}
-                          onChange={(e) => setCreateFormData({ ...createFormData, email: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
-                          required
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Nombre
-                        </label>
-                        <input
-                            type="text"
-                            value={createFormExtended.firstName}
-                            onChange={(e) => setCreateFormExtended({ ...createFormExtended, firstName: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Apellido
-                        </label>
-                        <input
-                            type="text"
-                            value={createFormExtended.lastName}
-                            onChange={(e) => setCreateFormExtended({ ...createFormExtended, lastName: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Teléfono
-                      </label>
-                      <input
-                          type="tel"
-                          value={createFormExtended.phone}
-                          onChange={(e) => setCreateFormExtended({ ...createFormExtended, phone: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Rol *
-                        </label>
-                        <select
-                            value={createFormData.role}
-                            onChange={(e) => setCreateFormData({ ...createFormData, role: e.target.value as UserRole })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
-                            required
-                        >
-                          <option value="student">Alumno</option>
-                          <option value="trainer">Entrenador</option>
-                          <option value="admin">Administrador</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Plan
-                        </label>
-                        <select
-                            value={createFormData.subscriptionPlan || ''}
-                            onChange={(e) => setCreateFormData({ ...createFormData, subscriptionPlan: e.target.value as SubscriptionPlan || undefined })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-dark-elevated dark:text-white"
-                        >
-                          <option value="">Sin plan</option>
-                          <option value="trial">Prueba</option>
-                          <option value="basic">Básico</option>
-                          <option value="premium">Premium</option>
-                          <option value="elite">Élite</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end space-x-3 pt-4">
-                      <button
-                          type="button"
-                          onClick={() => setShowCreateForm(false)}
-                          className="px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-dark-border rounded-lg hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                          type="submit"
-                          disabled={creatingUser || !createFormData.email}
-                          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center space-x-2"
-                      >
-                        {creatingUser ? (
-                            <>
-                              <Loader className="w-4 h-4 animate-spin" />
-                              <span>Creando...</span>
-                            </>
-                        ) : (
-                            <>
-                              <Save className="w-4 h-4" />
-                              <span>Crear Usuario</span>
-                            </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
                 </div>
               </div>
           )}
         </div>
+
+        {/* Create User Modal */}
+        {isCreatingUser && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white dark:bg-dark-surface rounded-lg p-6 max-w-md w-full mx-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                  Crear Nuevo Usuario
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Email *
+                    </label>
+                    <input
+                        type="email"
+                        value={newUserForm.email}
+                        onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+                        disabled={isLoading}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Nombre
+                      </label>
+                      <input
+                          type="text"
+                          value={newUserForm.firstName}
+                          onChange={(e) => setNewUserForm({ ...newUserForm, firstName: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+                          disabled={isLoading}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Apellido
+                      </label>
+                      <input
+                          type="text"
+                          value={newUserForm.lastName}
+                          onChange={(e) => setNewUserForm({ ...newUserForm, lastName: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+                          disabled={isLoading}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Teléfono
+                    </label>
+                    <input
+                        type="tel"
+                        value={newUserForm.phone}
+                        onChange={(e) => setNewUserForm({ ...newUserForm, phone: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+                        disabled={isLoading}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Rol
+                      </label>
+                      <select
+                          value={newUserForm.role}
+                          onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value as UserRole })}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+                          disabled={isLoading}
+                      >
+                        <option value="student">Estudiante</option>
+                        <option value="trainer">Entrenador</option>
+                        <option value="admin">Administrador</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Plan
+                      </label>
+                      <select
+                          value={newUserForm.subscriptionPlan}
+                          onChange={(e) => setNewUserForm({ ...newUserForm, subscriptionPlan: e.target.value as SubscriptionPlan })}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-dark-surface dark:text-white"
+                          disabled={isLoading}
+                      >
+                        <option value="basic">Básico</option>
+                        <option value="premium">Premium</option>
+                        <option value="elite">Elite</option>
+                        <option value="trial">Prueba</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex space-x-3 mt-6">
+                  <button
+                      onClick={handleCreateUser}
+                      disabled={isLoading || !newUserForm.email.trim()}
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                  >
+                    {isLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                        <UserPlus className="w-4 h-4" />
+                    )}
+                    <span>{isLoading ? 'Creando...' : 'Crear Usuario'}</span>
+                  </button>
+                  <button
+                      onClick={() => {
+                        setIsCreatingUser(false);
+                        setNewUserForm({
+                          email: '',
+                          role: 'student',
+                          subscriptionPlan: 'basic',
+                          firstName: '',
+                          lastName: '',
+                          phone: ''
+                        });
+                      }}
+                      disabled={isLoading}
+                      className="px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-dark-border rounded-lg hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showConfirmDelete && userToDelete && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white dark:bg-dark-surface rounded-lg p-6 max-w-md w-full mx-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                  Confirmar Eliminación
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400 mb-6">
+                  ¿Estás seguro de que quieres eliminar este usuario? Esta acción no se puede deshacer.
+                </p>
+                <div className="flex space-x-3">
+                  <button
+                      onClick={() => handleDeleteUser(userToDelete)}
+                      disabled={isLoading}
+                      className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? 'Eliminando...' : 'Eliminar'}
+                  </button>
+                  <button
+                      onClick={() => {
+                        setShowConfirmDelete(false);
+                        setUserToDelete(null);
+                      }}
+                      disabled={isLoading}
+                      className="flex-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-dark-border rounded-lg hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+        )}
+
+        {/* Email Sent Confirmation */}
+        {showEmailSent && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white dark:bg-dark-surface rounded-lg p-6 max-w-md w-full mx-4">
+                <div className="text-center">
+                  <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                    Usuario Creado
+                  </h3>
+                  <p className="text-gray-600 dark:text-gray-400 mb-6">
+                    Se ha enviado un email con las credenciales de acceso a {lastEmailSentTo}
+                  </p>
+                  <button
+                      onClick={() => setShowEmailSent(false)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Entendido
+                  </button>
+                </div>
+              </div>
+            </div>
+        )}
       </div>
   );
 };

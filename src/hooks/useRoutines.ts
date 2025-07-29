@@ -97,7 +97,17 @@ export const useRoutines = () => {
         setError(null);
 
         try {
-            const response = await apiService.routines.getAll(params);
+            const cleanParams: any = {};
+
+            if (params) {
+                Object.entries(params).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null && value !== '' && value !== 'all' && value !== 'undefined') {
+                        cleanParams[key] = value;
+                    }
+                });
+            }
+
+            const response = await apiService.routines.getAll(cleanParams);
             const routines = response.routines.map(routine => ({
                 ...routine,
                 createdAt: new Date(routine.created_at),
